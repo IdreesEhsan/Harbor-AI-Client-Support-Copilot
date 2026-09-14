@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     debug: bool = True
 
+    supabase_url: str
+    supabase_service_role_key: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
