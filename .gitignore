@@ -32,3 +32,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Knowledge-base source documents may contain private client content
+knowledge_base/source/*
+
+# Allow folder and synthetic demo files
+!knowledge_base/source/.gitkeep
+!knowledge_base/source/sample_*.txt
+
+# Processed chunks are generated locally
+knowledge_base/processed/*.json

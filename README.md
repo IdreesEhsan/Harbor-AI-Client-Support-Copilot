@@ -32,3 +32,16 @@ Harbor/
 ├── scripts/
 ├── n8n/
 └── docs/
+
+## Development Progress
+
+- [x] Phase 1 — FastAPI Foundation
+- [x] Phase 2 — Supabase Database Foundation
+- [x] Phase 3 — JWT Authentication
+- [x] Phase 4 — Knowledge Base & Flexible Document Chunking
+- [ ] Phase 5 — Embeddings & Supabase pgvector
+- [ ] Phase 6 — Retrieval-Augmented Generation
+- [ ] Phase 7 — LangGraph Agent
+- [ ] Phase 8 — Memory & Conversation History
+- [ ] Phase 9 — Guardrails & Human Escalation
+- [ ] Phase 10 — Automation & Business Integrations
