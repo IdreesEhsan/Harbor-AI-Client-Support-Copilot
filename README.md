@@ -39,9 +39,9 @@ Harbor/
 - [x] Phase 2 — Supabase Database Foundation
 - [x] Phase 3 — JWT Authentication
 - [x] Phase 4 — Knowledge Base & Flexible Document Chunking
-- [ ] Phase 5 — Embeddings & Supabase pgvector
+- [x] Phase 5 — Embeddings & Supabase pgvector
 - [ ] Phase 6 — Retrieval-Augmented Generation
 - [ ] Phase 7 — LangGraph Agent
-- [ ] Phase 8 — Memory & Conversation History
+- [ ] Phase 8 — Conversation History & Memory
 - [ ] Phase 9 — Guardrails & Human Escalation
 - [ ] Phase 10 — Automation & Business Integrations

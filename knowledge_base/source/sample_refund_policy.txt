@@ -17,3 +17,5 @@ Refund Support
 Customers who have questions about an existing refund should contact the support team.
 
 The support team may request additional order details before providing a status update.
+
+Urgent refund issues may be escalated to a support specialist.
