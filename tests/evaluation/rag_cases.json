@@ -1,0 +1,32 @@
+[
+  {
+    "id": "refund-001",
+    "question": "How long does a refund take?",
+    "expected_source": "sample_refund_policy.txt",
+    "should_answer": true
+  },
+  {
+    "id": "refund-002",
+    "question": "Can I request my money back?",
+    "expected_source": "sample_refund_policy.txt",
+    "should_answer": true
+  },
+  {
+    "id": "refund-003",
+    "question": "What information is required for a refund?",
+    "expected_source": "sample_refund_policy.txt",
+    "should_answer": true
+  },
+  {
+    "id": "unanswerable-001",
+    "question": "How do I cook biryani?",
+    "expected_source": null,
+    "should_answer": false
+  },
+  {
+    "id": "unanswerable-002",
+    "question": "Who won the World Cup?",
+    "expected_source": null,
+    "should_answer": false
+  }
+]

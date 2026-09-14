@@ -40,8 +40,8 @@ Harbor/
 - [x] Phase 3 — JWT Authentication
 - [x] Phase 4 — Knowledge Base & Flexible Document Chunking
 - [x] Phase 5 — Embeddings & Supabase pgvector
-- [ ] Phase 6 — Retrieval-Augmented Generation
-- [ ] Phase 7 — LangGraph Agent
+- [x] Phase 6 — RAG with Groq
+- [x] Phase 7 — LangGraph Agent Orchestration
 - [ ] Phase 8 — Conversation History & Memory
 - [ ] Phase 9 — Guardrails & Human Escalation
 - [ ] Phase 10 — Automation & Business Integrations
