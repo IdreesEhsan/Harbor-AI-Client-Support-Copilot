@@ -1,9 +1,12 @@
 from fastapi import FastAPI
-from app.api.rag import router as rag_router
-from app.api.health import router as health_router
-from app.core.config import get_settings
-from app.api.auth import router as auth_router
+
 from app.api.agent import router as agent_router
+from app.api.auth import router as auth_router
+from app.api.health import router as health_router
+from app.api.rag import router as rag_router
+from app.api.tickets import router as tickets_router
+from app.core.config import get_settings
+
 
 settings = get_settings()
 
@@ -17,6 +20,10 @@ app = FastAPI(
 
 @app.get("/")
 def root():
+    """
+    Basic Harbor API root endpoint.
+    """
+
     return {
         "message": "Harbor API is running",
         "environment": settings.app_env,
@@ -43,4 +50,10 @@ app.include_router(
 app.include_router(
     agent_router,
     prefix=settings.api_prefix,
+)
+
+app.include_router(
+    tickets_router,
+    prefix=settings.api_prefix,
+    tags=["Tickets"],
 )

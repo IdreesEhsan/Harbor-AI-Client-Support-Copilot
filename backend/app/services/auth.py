@@ -33,17 +33,32 @@ def verify_password(
 def create_access_token(
     user_id: str,
     email: str,
+    role: str,
 ) -> tuple[str, int]:
+    """
+    Create a signed Harbor access token.
 
-    expires_minutes = settings.jwt_access_token_expire_minutes
+    The role claim helps downstream authorization logic, but
+    Harbor still reloads the current user from the database
+    for protected requests. The database remains the current
+    source of truth for account state and permissions.
+    """
 
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=expires_minutes
+    expires_minutes = (
+        settings.jwt_access_token_expire_minutes
+    )
+
+    expire = (
+        datetime.now(timezone.utc)
+        + timedelta(
+            minutes=expires_minutes
+        )
     )
 
     payload: dict[str, Any] = {
         "sub": user_id,
         "email": email,
+        "role": role,
         "exp": expire,
         "iat": datetime.now(timezone.utc),
     }

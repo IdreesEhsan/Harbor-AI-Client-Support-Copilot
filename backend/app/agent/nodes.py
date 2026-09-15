@@ -11,6 +11,16 @@ from app.agent.tools import (
 from app.agent.memory_answerer import (
     answer_from_memory,
 )
+from app.guardrails.pipeline import (
+    run_input_guardrails,
+)
+from app.guardrails.tool_guardrail import (
+    evaluate_tool_call,
+)
+from app.guardrails.execution_control import (
+    ExecutionLimitExceededError,
+    increment_tool_call_count,
+)
 
 
 def decision_node(
@@ -57,11 +67,7 @@ def decision_node(
 
     return {
         "action": decision.action,
-
-        # Keep answer source separate from action so Harbor can
-        # distinguish workflow intent from information authority.
         "answer_source": decision.answer_source,
-
         "reason": decision.reason,
         "severity": decision.severity,
         "confidence": decision.confidence,
@@ -74,14 +80,13 @@ def answer_node(
     """
     Execute Harbor's grounded RAG pipeline.
 
-    This node is specifically the knowledge-base answer path.
+    Conversation memory may contextualize the request, but
+    Harbor's knowledge base remains the factual authority.
 
-    Conversation memory helps contextualize the user's request,
-    while the knowledge base remains the factual source used to
-    generate the final grounded answer.
+    Tool execution is protected by two independent controls:
 
-    Conversation memory must not be treated as authoritative
-    knowledge-base evidence.
+    1. Request-scoped tool-call limits at the graph boundary.
+    2. Tool authorization inside search_knowledge_base itself.
     """
 
     question = state.get(
@@ -111,17 +116,62 @@ def answer_node(
         "",
     )
 
-    # Rewrite contextual follow-ups into a standalone query
-    # before searching the knowledge base.
+    # Convert a contextual follow-up into a standalone
+    # retrieval question.
     #
-    # Memory is used here only to understand the question.
-    # The retrieved KB chunks remain the factual authority.
+    # Conversation memory helps Harbor understand the request,
+    # but the knowledge base remains the factual authority.
     retrieval_question = contextualize_question(
         question=question,
         history=history,
         conversation_summary=conversation_summary,
     )
 
+    current_tool_calls = state.get(
+        "tool_call_count",
+        0,
+    )
+
+    try:
+        # Increment BEFORE execution.
+        #
+        # If Harbor has already consumed the maximum number
+        # of tool calls, this raises before the protected
+        # capability can execute.
+        new_tool_call_count = (
+            increment_tool_call_count(
+                current_tool_calls
+            )
+        )
+
+    except ExecutionLimitExceededError as exc:
+        return {
+            "answer": (
+                "I couldn't continue processing this "
+                "request safely because the tool execution "
+                "limit was reached."
+            ),
+            "grounded": False,
+            "citations": [],
+            "retrieved_chunks": 0,
+
+            # Preserve the previous valid count because the
+            # rejected tool call never actually executed.
+            "tool_call_count": current_tool_calls,
+            "execution_limit_reached": True,
+            "error": str(exc),
+        }
+
+    # The LangChain tool performs its own independent
+    # authorization check before invoking the RAG service.
+    #
+    # This gives Harbor defense in depth:
+    #
+    # graph execution limit
+    #       ↓
+    # tool authorization
+    #       ↓
+    # actual RAG capability
     result = search_knowledge_base.invoke(
         {
             "question": retrieval_question,
@@ -135,7 +185,13 @@ def answer_node(
         "retrieved_chunks": result[
             "retrieved_chunks"
         ],
+
+        # Store the updated request-scoped execution count
+        # back into LangGraph state.
+        "tool_call_count": new_tool_call_count,
+        "execution_limit_reached": False,
     }
+
 
 def memory_answer_node(
     state: HarborAgentState,
@@ -187,17 +243,17 @@ def memory_answer_node(
     return {
         "answer": answer,
 
-        # "grounded" currently means grounded against the
-        # authoritative Harbor knowledge base. Memory recall
-        # therefore remains False.
+        # "grounded" means grounded against Harbor's
+        # authoritative knowledge base. Conversation-memory
+        # recall therefore remains False.
         "grounded": False,
 
-        # Conversation memory is not KB evidence, so do not
-        # manufacture knowledge-base citations.
+        # Conversation memory is not KB evidence.
         "citations": [],
         "retrieved_chunks": 0,
         "escalation_required": False,
     }
+
 
 def clarify_node(
     state: HarborAgentState,
@@ -228,8 +284,12 @@ def escalation_node(
     """
     Mark the request for human support.
 
-    A later Harbor phase will persist escalations and send
-    them to systems such as Monday.com through automation.
+    Escalation means Harbor has determined that a human
+    support agent should handle the case.
+
+    This is different from human approval of a side-effecting
+    tool. External escalation persistence will be implemented
+    later.
     """
 
     reason = state.get(
@@ -247,4 +307,177 @@ def escalation_node(
         "retrieved_chunks": 0,
         "escalation_required": True,
         "escalation_reason": reason,
+    }
+
+
+def input_guardrail_node(
+    state: HarborAgentState,
+) -> dict:
+    """
+    Inspect user input before Harbor performs routing,
+    retrieval, memory answering, or tool execution.
+
+    If sensitive information can safely be removed, the
+    sanitized message becomes the downstream question.
+    """
+
+    question = state.get(
+        "question",
+        "",
+    )
+
+    result = run_input_guardrails(
+        question
+    )
+
+    update = {
+        "original_question": question,
+        "guardrail_status": result.status,
+        "guardrail_category": result.category,
+        "guardrail_reason": result.reason,
+    }
+
+    if result.status == "redact":
+        update["question"] = (
+            result.redacted_content
+            or question
+        )
+
+    return update
+
+
+def blocked_input_node(
+    state: HarborAgentState,
+) -> dict:
+    """
+    Return a controlled response for input rejected by
+    Harbor's guardrails.
+
+    This node does not call Groq, RAG, memory, or tools.
+    """
+
+    category = state.get(
+        "guardrail_category",
+        "policy_violation",
+    )
+
+    if category == "prompt_injection":
+        answer = (
+            "I can't follow instructions that attempt to "
+            "override or expose Harbor's protected system "
+            "instructions. I can still help with a normal "
+            "support question."
+        )
+    else:
+        answer = (
+            "I couldn't process that request safely. "
+            "Please rephrase your support question."
+        )
+
+    return {
+        "answer": answer,
+
+        # Internal graph provenance only.
+        # This is not an LLM-selectable router value.
+        "action": "answer",
+        "answer_source": "guardrail",
+
+        "severity": "low",
+        "grounded": False,
+        "citations": [],
+        "retrieved_chunks": 0,
+        "escalation_required": False,
+    }
+
+
+# ============================================================
+# Tool Authorization
+# ============================================================
+
+
+def tool_authorization_node(
+    state: HarborAgentState,
+) -> dict:
+    """
+    Evaluate a requested tool before Harbor is allowed to
+    execute it.
+
+    This node performs authorization only. It deliberately
+    does NOT execute the requested tool.
+
+    Known read/analysis tools may be allowed, write tools
+    require human approval, and unknown tools fail closed.
+    """
+
+    tool_name = state.get(
+        "pending_tool_name",
+        "",
+    )
+
+    result = evaluate_tool_call(
+        tool_name
+    )
+
+    return {
+        "tool_decision": result.decision,
+        "tool_decision_reason": result.reason,
+    }
+
+
+# ============================================================
+# Human-in-the-Loop Approval
+# ============================================================
+
+
+def pending_approval_node(
+    state: HarborAgentState,
+) -> dict:
+    """
+    Stop Harbor before a side-effecting operation executes.
+
+    The requested tool and arguments remain represented in
+    LangGraph state, but this node performs NO external
+    operation.
+
+    Future side-effecting capabilities such as ticket
+    creation or external notifications must pass through
+    human approval before execution.
+    """
+
+    tool_name = state.get(
+        "pending_tool_name",
+        "requested action",
+    )
+
+    return {
+        "answer": (
+            "This action requires human approval before "
+            "Harbor can continue."
+        ),
+
+        # Human authorization is now required.
+        "action": "escalate",
+
+        # Internal provenance rather than an LLM-selectable
+        # answer source.
+        "answer_source": "guardrail",
+
+        "severity": state.get(
+            "severity",
+            "medium",
+        ),
+
+        "grounded": False,
+        "citations": [],
+        "retrieved_chunks": 0,
+
+        "escalation_required": True,
+
+        "escalation_reason": (
+            f"Tool '{tool_name}' requires human approval."
+        ),
+
+        # Crucially, the external operation has NOT happened.
+        "pending_human_approval": True,
+        "approval_status": "pending",
     }

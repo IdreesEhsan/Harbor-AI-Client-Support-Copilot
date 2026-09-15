@@ -4,6 +4,8 @@ from jwt import ExpiredSignatureError, InvalidTokenError
 
 from app.db.supabase import get_supabase_client
 from app.services.auth import decode_access_token
+from collections.abc import Callable
+from app.schemas.auth import UserRole
 
 
 oauth2_scheme = OAuth2PasswordBearer(
@@ -48,7 +50,7 @@ def get_current_user(
         supabase
         .table("users")
         .select(
-            "id,email,full_name,is_active"
+            "id,email,full_name,is_active,role"
         )
         .eq("id", user_id)
         .limit(1)
@@ -67,3 +69,47 @@ def get_current_user(
         )
 
     return user
+
+def require_roles(
+    *allowed_roles: UserRole,
+) -> Callable:
+    """
+    Create a FastAPI dependency that restricts an endpoint
+    to one or more Harbor roles.
+
+    Authentication and authorization remain separate:
+
+    get_current_user()
+        -> proves who the caller is
+
+    require_roles(...)
+        -> determines whether that caller may perform the
+           protected operation
+    """
+
+    if not allowed_roles:
+        raise ValueError(
+            "At least one allowed role is required."
+        )
+
+    def role_dependency(
+        current_user=Depends(
+            get_current_user
+        ),
+    ):
+        user_role = current_user.get(
+            "role"
+        )
+
+        if user_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "You do not have permission "
+                    "to perform this action."
+                ),
+            )
+
+        return current_user
+
+    return role_dependency
