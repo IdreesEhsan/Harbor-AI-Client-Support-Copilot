@@ -5,6 +5,7 @@ from app.agent.nodes import (
     clarify_node,
     decision_node,
     escalation_node,
+    memory_answer_node,
 )
 from app.agent.state import HarborAgentState
 
@@ -13,15 +14,36 @@ def route_after_decision(
     state: HarborAgentState,
 ) -> str:
     """
-    Return the graph route selected by Harbor's decision node.
+    Select Harbor's next graph node from the validated
+    routing decision.
 
-    LangGraph uses this value to choose the next node.
+    The action determines the workflow behavior, while
+    answer_source determines which information source should
+    handle normal answer requests.
     """
 
-    action = state.get("action")
+    action = state.get(
+        "action"
+    )
+
+    answer_source = state.get(
+        "answer_source",
+        "knowledge_base",
+    )
 
     if action == "answer":
-        return "answer"
+        if answer_source == "knowledge_base":
+            return "answer"
+
+        if answer_source == "conversation_memory":
+            return "memory_answer"
+
+        # Never silently send an unsupported answer source
+        # through the knowledge-base pipeline.
+        raise ValueError(
+            "Unsupported answer source: "
+            f"{answer_source}"
+        )
 
     if action == "clarify":
         return "clarify"
@@ -29,8 +51,8 @@ def route_after_decision(
     if action == "escalate":
         return "escalate"
 
-    # A missing or unsupported routing decision should never silently
-    # continue through the graph.
+    # A missing or unsupported routing decision should never
+    # silently continue through the graph.
     raise ValueError(
         f"Unsupported agent action: {action}"
     )
@@ -38,25 +60,47 @@ def route_after_decision(
 
 def build_harbor_graph():
     """
-    Construct Harbor's Phase 7 LangGraph workflow.
+    Construct Harbor's LangGraph support workflow.
 
-    The graph first classifies the request and then follows exactly
-    one controlled branch: answer, clarify, or escalate.
+    Requests first pass through the decision node.
+
+    Normal answer requests are then separated by information
+    authority:
+
+    - knowledge_base:
+      Uses Harbor's grounded RAG pipeline.
+
+    - conversation_memory:
+      Uses previous conversation context without treating that
+      information as authoritative knowledge-base evidence.
+
+    Clarification and escalation remain separate controlled
+    workflow branches.
     """
 
     graph = StateGraph(
         HarborAgentState
     )
 
-    # Register graph nodes.
+    # ---------------------------------------------------------
+    # Register graph nodes
+    # ---------------------------------------------------------
+
     graph.add_node(
         "decision",
         decision_node,
     )
 
+    # Authoritative Harbor knowledge-base / RAG answer.
     graph.add_node(
         "answer",
         answer_node,
+    )
+
+    # User-specific conversation-memory recall.
+    graph.add_node(
+        "memory_answer",
+        memory_answer_node,
     )
 
     graph.add_node(
@@ -69,26 +113,41 @@ def build_harbor_graph():
         escalation_node,
     )
 
-    # Every request begins with classification.
+    # ---------------------------------------------------------
+    # Graph entry point
+    # ---------------------------------------------------------
+
     graph.add_edge(
         START,
         "decision",
     )
 
-    # Choose one branch based on the validated router output.
+    # ---------------------------------------------------------
+    # Conditional routing
+    # ---------------------------------------------------------
+
     graph.add_conditional_edges(
         "decision",
         route_after_decision,
         {
             "answer": "answer",
+            "memory_answer": "memory_answer",
             "clarify": "clarify",
             "escalate": "escalate",
         },
     )
 
-    # Each Phase 7 branch finishes after producing its result.
+    # ---------------------------------------------------------
+    # Terminal branches
+    # ---------------------------------------------------------
+
     graph.add_edge(
         "answer",
+        END,
+    )
+
+    graph.add_edge(
+        "memory_answer",
         END,
     )
 

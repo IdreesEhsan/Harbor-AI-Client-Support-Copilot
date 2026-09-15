@@ -173,3 +173,146 @@ def test_graph_escalation_path(
         result["severity"]
         == "medium"
     )
+
+
+def test_route_after_decision_memory_answer():
+    """
+    Answer requests whose source is conversation memory
+    should route to the dedicated memory-answer node.
+    """
+
+    state = {
+        "action": "answer",
+        "answer_source": "conversation_memory",
+    }
+
+    route = route_after_decision(
+        state
+    )
+
+    assert route == "memory_answer"
+
+
+def test_route_after_decision_explicit_knowledge_base():
+    """
+    Knowledge-base answer requests should continue through
+    Harbor's grounded RAG answer node.
+    """
+
+    state = {
+        "action": "answer",
+        "answer_source": "knowledge_base",
+    }
+
+    route = route_after_decision(
+        state
+    )
+
+    assert route == "answer"
+
+
+def test_route_after_decision_rejects_unknown_answer_source():
+    """
+    Harbor must never silently route an unsupported
+    information source through the RAG pipeline.
+    """
+
+    state = {
+        "action": "answer",
+        "answer_source": "unsupported_source",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported answer source",
+    ):
+        route_after_decision(
+            state
+        )
+
+@patch(
+    "app.agent.nodes.classify_request"
+)
+@patch(
+    "app.agent.nodes.answer_from_memory"
+)
+def test_graph_memory_answer_path(
+    mock_answer_from_memory,
+    mock_classify,
+):
+    """
+    The compiled LangGraph should route conversation-memory
+    requests to memory_answer_node rather than the RAG node.
+    """
+
+    # Tell Harbor's router that this question should be
+    # answered from conversation memory.
+    mock_classify.return_value = (
+        AgentDecision(
+            action="answer",
+            answer_source="conversation_memory",
+            reason=(
+                "The user is asking Harbor to recall "
+                "an order reference supplied earlier."
+            ),
+            severity="low",
+            confidence=0.99,
+        )
+    )
+
+    # Simulate the dedicated memory-answer component
+    # successfully recalling an older user-provided value.
+    mock_answer_from_memory.return_value = (
+        "Your order reference was ORD-7842."
+    )
+
+    result = harbor_graph.invoke(
+        {
+            "question": (
+                "What was my order reference?"
+            ),
+            "history": [],
+            "conversation_summary": (
+                "The user previously provided order "
+                "reference ORD-7842."
+            ),
+        }
+    )
+
+    # Router decision should survive graph execution.
+    assert result["action"] == "answer"
+
+    assert (
+        result["answer_source"]
+        == "conversation_memory"
+    )
+
+    # The answer should come from conversation memory.
+    assert (
+        result["answer"]
+        == "Your order reference was ORD-7842."
+    )
+
+    # Conversation-memory answers are not KB-grounded
+    # RAG responses.
+    assert result["grounded"] is False
+    assert result["citations"] == []
+    assert result["retrieved_chunks"] == 0
+
+    assert (
+        result["escalation_required"]
+        is False
+    )
+
+    # Verify both memory layers and the current question
+    # reached the memory-answer component correctly.
+    mock_answer_from_memory.assert_called_once_with(
+        question=(
+            "What was my order reference?"
+        ),
+        history=[],
+        conversation_summary=(
+            "The user previously provided order "
+            "reference ORD-7842."
+        ),
+    )

@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     groq_api_key: str
     groq_model: str = "llama-3.3-70b-versatile"
 
+    # Conversation-memory configuration.
+    memory_buffer_size: int = 8
+
+    # Once a conversation grows beyond this number of
+    # messages, older messages can be compressed into
+    # persistent summary memory.
+    memory_summary_threshold: int = 12
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

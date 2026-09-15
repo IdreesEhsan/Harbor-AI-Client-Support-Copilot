@@ -1,39 +1,53 @@
-from typing import Any, TypedDict
+from typing import TypedDict
 
 
 class HarborAgentState(TypedDict, total=False):
     """
     Shared state passed between Harbor's LangGraph nodes.
 
-    Fields are optional because different nodes populate different
-    parts of the state as the request moves through the graph.
+    The state carries the current request, both conversation-memory
+    layers, routing decisions, and the final response produced by
+    the selected workflow branch.
     """
 
-    # Request identity
     user_id: str
-    conversation_id: str | None
+    conversation_id: str
 
-    # Original user input
+    # Current user request.
     question: str
 
-    # Router output
+    # Recent conversation turns used as short-term buffer memory.
+    history: list[dict[str, str]]
+
+    # Compressed long-term conversational memory.
+    conversation_summary: str
+
+    # Router decision.
     action: str
+
+    # Determines which information source should be used when
+    # action == "answer".
+    #
+    # Expected values:
+    # - "knowledge_base"
+    # - "conversation_memory"
+    answer_source: str
+
     reason: str
     severity: str
     confidence: float
 
-    # RAG / answer output
+    # Final response data.
     answer: str
-    citations: list[dict[str, Any]]
+    citations: list[dict]
     grounded: bool
     retrieved_chunks: int
 
-    # Clarification flow
-    clarification_question: str | None
+    # Clarification flow.
+    clarification_question: str
 
-    # Human escalation flow
+    # Escalation flow.
     escalation_required: bool
-    escalation_reason: str | None
+    escalation_reason: str
 
-    # Failure information used by graph nodes
-    error: str | None
+    error: str

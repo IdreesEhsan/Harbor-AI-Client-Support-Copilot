@@ -6,7 +6,9 @@ from app.agent.schemas import (
 )
 from app.agent.service import run_agent
 from app.dependencies.auth import get_current_user
-
+from app.services.conversation_service import (
+    ConversationNotFoundError,
+)
 
 router = APIRouter(
     prefix="/agent",
@@ -25,7 +27,7 @@ def agent_chat(
     ),
 ) -> AgentResponse:
     """
-    Run an authenticated user message through Harbor's LangGraph agent.
+    Run an authenticated Harbor conversation turn.
     """
 
     try:
@@ -40,6 +42,12 @@ def agent_chat(
                 payload.conversation_id
             ),
         )
+
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found.",
+        ) from exc
 
     except ValueError as exc:
         raise HTTPException(
