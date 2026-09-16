@@ -38,27 +38,24 @@ class Settings(BaseSettings):
 
     # Conversation memory
     memory_buffer_size: int = 8
-
-    # Once a conversation grows beyond this number of
-    # messages, older messages can be compressed into
-    # persistent summary memory.
     memory_summary_threshold: int = 12
 
-    # Monday.com
+    # Monday.com integration
     #
-    # These values are loaded from environment variables.
-    # Secrets must never be hardcoded into Harbor's source
-    # code or committed to Git.
+    # Monday configuration is optional at application startup.
+    # The integration validates these values only when an
+    # external Monday operation is requested.
     monday_api_token: str | None = None
+    monday_api_url: str = "https://api.monday.com/v2"
+
     monday_board_id: str | None = None
     monday_group_id: str | None = None
 
-    # Keeping the API URL configurable makes the integration
-    # easier to test and avoids scattering external URLs
-    # throughout the application.
-    monday_api_url: str = (
-        "https://api.monday.com/v2"
-    )
+    monday_harbor_ticket_id_column_id: str | None = None
+    monday_status_column_id: str | None = None
+    monday_idempotency_key_column_id: str | None = None
+    monday_description_column_id: str | None = None
+    monday_severity_column_id: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,

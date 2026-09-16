@@ -16,6 +16,7 @@ TicketStatus = Literal[
     "pending_approval",
     "approved",
     "rejected",
+    "executing",
     "open",
     "in_progress",
     "resolved",
@@ -63,30 +64,29 @@ class TicketCreate(BaseModel):
 class TicketRecord(TicketCreate):
     """
     Complete persisted Harbor ticket representation.
+
+    Execution claim metadata is populated only while a worker
+    owns the external-execution lease.
     """
 
     id: UUID
 
-    status: TicketStatus = (
-        "pending_approval"
-    )
-
-    approval_status: ApprovalStatus = (
-        "pending"
-    )
+    status: TicketStatus = "pending_approval"
+    approval_status: ApprovalStatus = "pending"
 
     approved_by: UUID | None = None
     approved_at: datetime | None = None
 
+    execution_claim_id: UUID | None = None
+    execution_started_at: datetime | None = None
+
     monday_item_id: str | None = None
     external_status: str | None = None
-
     last_synced_at: datetime | None = None
     failure_reason: str | None = None
 
     created_at: datetime
     updated_at: datetime
-
 
 class TicketApprovalRequest(BaseModel):
     """
