@@ -116,6 +116,8 @@ def get_ticket(
     """
     Fetch one ticket while enforcing ownership.
 
+    This method is intended for customer-scoped access.
+
     Both the ticket ID and authenticated user ID are included
     in the query so users cannot access tickets owned by
     other users.
@@ -150,8 +152,10 @@ def list_tickets(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Return the authenticated user's most recently created
-    tickets.
+    Return tickets belonging to one authenticated customer.
+
+    This function remains user-scoped and must not be used
+    for the Harbor staff queue.
     """
 
     if limit <= 0:
@@ -169,6 +173,41 @@ def list_tickets(
             "user_id",
             user_id,
         )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(limit)
+        .execute()
+    )
+
+    return response.data or []
+
+
+def list_tickets_for_review(
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    Return support tickets for authorized Harbor staff.
+
+    Unlike list_tickets(), this function is deliberately not
+    scoped to the ticket owner's user ID.
+
+    This function must only be exposed behind a trusted
+    staff/admin authorization boundary.
+    """
+
+    if limit <= 0:
+        raise ValueError(
+            "Ticket list limit must be greater than zero."
+        )
+
+    client = get_supabase_client()
+
+    response = (
+        client
+        .table("support_tickets")
+        .select("*")
         .order(
             "created_at",
             desc=True,
@@ -223,8 +262,7 @@ def approve_ticket(
     Atomically approve a currently pending Harbor ticket.
 
     The update is restricted to tickets whose workflow is
-    still pending approval. If the ticket does not exist or
-    has already been decided, no row is returned.
+    still pending approval.
 
     Approval only changes Harbor's internal ticket state. It
     does not create an external Monday.com item or trigger
@@ -282,9 +320,6 @@ def reject_ticket(
     The reviewer is recorded in approved_by because the
     current database schema uses that column for the human
     decision actor.
-
-    If the ticket does not exist or is no longer pending,
-    no row is returned.
     """
 
     decided_at = datetime.now(
@@ -332,49 +367,26 @@ def mark_ticket_executed(
     execution_claim_id: str,
 ) -> dict[str, Any] | None:
     """
-    Record successful Monday.com synchronization for the
-    worker that currently owns Harbor's execution claim.
+    Record successful Monday.com synchronization.
 
     The update succeeds only when:
-    - human approval remains approved;
+    - approval remains approved;
     - workflow status is executing;
-    - the persisted execution claim matches this worker;
-    - no Monday item has already been recorded.
-
-    Requiring the execution claim ID prevents an old or stale
-    worker from finalizing execution after ownership has
-    changed.
-
-    Successful finalization transitions:
-
-        executing -> open
-
-    The temporary execution lease metadata is cleared after
-    successful synchronization.
-
-    This repository function does not call Monday.com.
+    - the execution claim belongs to this worker;
+    - no Monday item has already been persisted.
     """
 
-    if not isinstance(
-        ticket_id,
-        str,
-    ):
+    if not isinstance(ticket_id, str):
         raise TypeError(
             "ticket_id must be a string."
         )
 
-    if not isinstance(
-        monday_item_id,
-        str,
-    ):
+    if not isinstance(monday_item_id, str):
         raise TypeError(
             "monday_item_id must be a string."
         )
 
-    if not isinstance(
-        execution_claim_id,
-        str,
-    ):
+    if not isinstance(execution_claim_id, str):
         raise TypeError(
             "execution_claim_id must be a string."
         )
@@ -411,19 +423,13 @@ def mark_ticket_executed(
         .table("support_tickets")
         .update(
             {
-                "monday_item_id": (
-                    monday_item_id
-                ),
+                "monday_item_id": monday_item_id,
                 "status": "open",
                 "external_status": "Open",
                 "last_synced_at": synced_at,
                 "failure_reason": None,
-
-                # Successful synchronization releases the
-                # temporary execution lease.
                 "execution_claim_id": None,
                 "execution_started_at": None,
-
                 "updated_at": synced_at,
             }
         )
@@ -462,37 +468,9 @@ def claim_ticket_for_execution(
     """
     Atomically claim an approved Harbor ticket for external
     execution.
-
-    Only a ticket whose persisted state is exactly:
-
-        approval_status = approved
-        status = approved
-        monday_item_id IS NULL
-
-    may transition to:
-
-        status = executing
-        execution_claim_id = <unique UUID>
-        execution_started_at = <UTC timestamp>
-
-    The execution claim UUID identifies the worker attempt
-    that owns the temporary execution lease.
-
-    Later finalization must present the same claim ID.
-
-    The conditional database update remains Harbor's
-    concurrency boundary. If multiple workers attempt to
-    claim the same ticket, only one approved -> executing
-    transition can succeed.
-
-    Returning None means this worker did not obtain the
-    execution claim.
     """
 
-    if not isinstance(
-        ticket_id,
-        str,
-    ):
+    if not isinstance(ticket_id, str):
         raise TypeError(
             "ticket_id must be a string."
         )
@@ -553,6 +531,7 @@ def claim_ticket_for_execution(
 
     return response.data[0]
 
+
 def recover_stale_execution_claim(
     ticket_id: str,
     previous_claim_id: str,
@@ -560,51 +539,14 @@ def recover_stale_execution_claim(
     """
     Atomically replace a stale execution lease with a new
     execution lease.
-
-    The caller must first determine that the previous lease
-    is stale. This repository function is responsible only
-    for the atomic ownership transition.
-
-    Recovery is permitted only when the persisted ticket
-    still has exactly the execution claim that the recovery
-    worker inspected:
-
-        approval_status = approved
-        status = executing
-        execution_claim_id = previous_claim_id
-        monday_item_id IS NULL
-
-    If another worker has already recovered or finalized the
-    ticket, the previous claim ID will no longer match and
-    this update returns no row.
-
-    This provides compare-and-swap behavior:
-
-        OLD stale claim
-              ↓
-        conditional update
-              ↓
-        NEW execution claim
-
-    The ticket remains in ``executing`` throughout recovery.
-    It is never reopened to ``approved``.
-
-    This function does not determine whether a lease is stale
-    and does not perform any Monday.com operation.
     """
 
-    if not isinstance(
-        ticket_id,
-        str,
-    ):
+    if not isinstance(ticket_id, str):
         raise TypeError(
             "ticket_id must be a string."
         )
 
-    if not isinstance(
-        previous_claim_id,
-        str,
-    ):
+    if not isinstance(previous_claim_id, str):
         raise TypeError(
             "previous_claim_id must be a string."
         )
@@ -639,7 +581,6 @@ def recover_stale_execution_claim(
         .table("support_tickets")
         .update(
             {
-                # The ticket deliberately remains executing.
                 "status": "executing",
                 "execution_claim_id": (
                     new_claim_id

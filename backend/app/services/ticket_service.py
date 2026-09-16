@@ -10,6 +10,7 @@ from app.repositories.ticket_repository import (
     get_ticket,
     get_ticket_for_review,
     list_tickets,
+    list_tickets_for_review,
     reject_ticket,
 )
 from app.tickets.schemas import (
@@ -30,15 +31,12 @@ class UnsafeTicketContentError(Exception):
     """
     Raised when Harbor refuses to persist unsafe ticket
     content.
-
-    Ticket records must never become a bypass around the
-    normal input guardrails.
     """
 
 
 class TicketNotFoundError(Exception):
     """
-    Raised when a support ticket cannot be found for review.
+    Raised when a support ticket cannot be found.
     """
 
 
@@ -54,12 +52,6 @@ def prepare_ticket_content(
 ) -> str:
     """
     Sanitize ticket text before persistence.
-
-    Safe content is preserved. PII and credentials are
-    replaced with their guardrail-safe representations.
-
-    Content classified as blocked is rejected completely
-    instead of being written into the ticket record.
     """
 
     if not isinstance(content, str):
@@ -115,8 +107,6 @@ def prepare_ticket_content(
             "Harbor's guardrails."
         )
 
-    # Fail closed if the guardrail contract changes in the
-    # future and an unknown status reaches this boundary.
     raise UnsafeTicketContentError(
         "Ticket content could not be validated safely."
     )
@@ -132,12 +122,6 @@ def build_ticket_idempotency_key(
     """
     Build a deterministic idempotency key for one logical
     escalation request.
-
-    Raw customer content is not stored inside the key.
-    Instead, Harbor hashes the identifying ticket fields.
-
-    Retrying the same logical escalation therefore produces
-    the same key and prevents duplicate ticket creation.
     """
 
     normalized = "|".join(
@@ -167,15 +151,8 @@ def prepare_support_ticket(
     """
     Prepare and persist an internal Harbor escalation ticket.
 
-    The operation:
-
-    1. verifies conversation ownership;
-    2. sanitizes ticket content;
-    3. creates a deterministic idempotency key;
-    4. creates a pending internal ticket.
-
-    This does not approve the ticket and does not execute
-    Monday.com, n8n, notification, or other external actions.
+    This operation does not approve or externally execute the
+    ticket.
     """
 
     conversation = get_conversation(
@@ -227,7 +204,7 @@ def get_user_ticket(
     user_id: str,
 ) -> dict[str, Any] | None:
     """
-    Return one ticket owned by the authenticated user.
+    Return one ticket owned by the authenticated customer.
     """
 
     return get_ticket(
@@ -242,11 +219,27 @@ def list_user_tickets(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Return tickets belonging to the authenticated user.
+    Return tickets belonging to the authenticated customer.
     """
 
     return list_tickets(
         user_id=user_id,
+        limit=limit,
+    )
+
+
+def list_staff_tickets(
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    Return Harbor's staff support queue.
+
+    Role authorization must be enforced by the FastAPI API
+    boundary before this service function is called.
+    """
+
+    return list_tickets_for_review(
         limit=limit,
     )
 
@@ -256,11 +249,7 @@ def review_ticket(
     ticket_id: str,
 ) -> dict[str, Any]:
     """
-    Load a ticket for an authorized human reviewer.
-
-    Role authorization is enforced by the API boundary.
-    This service is responsible for validating that the
-    requested ticket exists.
+    Load one support ticket for an authorized human reviewer.
     """
 
     ticket = get_ticket_for_review(
@@ -286,14 +275,6 @@ def decide_ticket_approval(
 
     Only tickets that remain pending human approval may be
     decided.
-
-    This operation changes Harbor's internal ticket state
-    only. It does not execute an external side effect such as
-    creating a Monday.com item.
-
-    The repository performs an additional conditional update
-    so concurrent approval attempts cannot overwrite an
-    already completed decision.
     """
 
     ticket = review_ticket(
@@ -319,11 +300,6 @@ def decide_ticket_approval(
             rejected_by=reviewer_id,
         )
 
-    # A second reviewer may have decided the ticket between
-    # our initial read and the conditional database update.
-    #
-    # In that case the repository returns None rather than
-    # overwriting the first reviewer's decision.
     if updated_ticket is None:
         raise TicketAlreadyDecidedError(
             "Support ticket has already been decided."

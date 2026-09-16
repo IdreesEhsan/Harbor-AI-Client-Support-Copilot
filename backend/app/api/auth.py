@@ -2,10 +2,15 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import (
+    OAuth2PasswordRequestForm,
+)
 
+from app.core.config import get_settings
+from app.core.rate_limit import limiter
 from app.db.supabase import get_supabase_client
 from app.dependencies.auth import get_current_user
 from app.schemas.auth import (
@@ -21,7 +26,12 @@ from app.services.auth import (
 )
 
 
-router = APIRouter(prefix="/auth")
+settings = get_settings()
+
+
+router = APIRouter(
+    prefix="/auth"
+)
 
 
 def authenticate_user(
@@ -31,13 +41,21 @@ def authenticate_user(
     """
     Authenticate a Harbor user using email and password.
 
-    This helper is shared by the normal JSON login endpoint
-    and the OAuth2-compatible Swagger login endpoint.
-
-    The user's role is loaded from the database so Harbor can
-    include the current authorization role in the login
-    response and JWT.
+    Used by both React JSON login and Swagger OAuth2 login.
     """
+
+    email = email.strip().lower()
+
+    if not email:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            detail="Invalid email or password",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
+        )
 
     supabase = get_supabase_client()
 
@@ -50,7 +68,7 @@ def authenticate_user(
         )
         .eq(
             "email",
-            email.lower(),
+            email,
         )
         .limit(1)
         .execute()
@@ -58,7 +76,9 @@ def authenticate_user(
 
     if not response.data:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
             detail="Invalid email or password",
             headers={
                 "WWW-Authenticate": "Bearer"
@@ -72,7 +92,9 @@ def authenticate_user(
         user["password_hash"],
     ):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
             detail="Invalid email or password",
             headers={
                 "WWW-Authenticate": "Bearer"
@@ -81,7 +103,9 @@ def authenticate_user(
 
     if not user["is_active"]:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
             detail="User account is inactive",
         )
 
@@ -92,17 +116,15 @@ def build_token_response(
     user: dict,
 ) -> TokenResponse:
     """
-    Create the JWT response returned after successful
-    authentication.
-
-    The current Harbor role is included in both the JWT and
-    the public user response.
+    Create Harbor's JWT authentication response.
     """
 
-    access_token, expires_in = create_access_token(
-        user_id=user["id"],
-        email=user["email"],
-        role=user["role"],
+    access_token, expires_in = (
+        create_access_token(
+            user_id=user["id"],
+            email=user["email"],
+            role=user["role"],
+        )
     )
 
     return TokenResponse(
@@ -123,20 +145,31 @@ def build_token_response(
 @router.post(
     "/register",
     response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
+)
+@limiter.limit(
+    settings.auth_rate_limit
 )
 def register(
+    request: Request,
     payload: RegisterRequest,
 ):
     """
-    Register a new Harbor customer.
+    Register a Harbor customer.
 
-    Public registration always assigns the customer role.
-    Clients cannot choose support_agent or admin during
-    registration.
+    Public registration is deliberately restricted to the
+    customer role. Privileged roles cannot be self-assigned.
     """
 
-    supabase = get_supabase_client()
+    supabase = (
+        get_supabase_client()
+    )
+
+    normalized_email = (
+        payload.email.strip().lower()
+    )
 
     existing_user = (
         supabase
@@ -144,7 +177,7 @@ def register(
         .select("id")
         .eq(
             "email",
-            payload.email.lower(),
+            normalized_email,
         )
         .limit(1)
         .execute()
@@ -152,14 +185,19 @@ def register(
 
     if existing_user.data:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
             detail=(
-                "User with this email already exists"
+                "User with this email "
+                "already exists"
             ),
         )
 
-    password_hash = hash_password(
-        payload.password
+    password_hash = (
+        hash_password(
+            payload.password
+        )
     )
 
     response = (
@@ -167,11 +205,15 @@ def register(
         .table("users")
         .insert(
             {
-                "email": payload.email.lower(),
-                "password_hash": password_hash,
-                "full_name": payload.full_name,
-                # Public users must never be able to
-                # self-assign privileged Harbor roles.
+                "email": (
+                    normalized_email
+                ),
+                "password_hash": (
+                    password_hash
+                ),
+                "full_name": (
+                    payload.full_name
+                ),
                 "role": "customer",
             }
         )
@@ -203,14 +245,17 @@ def register(
     "/login",
     response_model=TokenResponse,
 )
+@limiter.limit(
+    settings.auth_rate_limit
+)
 def login(
+    request: Request,
     payload: LoginRequest,
 ):
     """
-    Normal JSON login endpoint.
+    JSON login endpoint used by Harbor's React frontend.
 
-    This endpoint is intended for clients such as Harbor's
-    React frontend.
+    Rate limiting reduces brute-force login attempts.
     """
 
     user = authenticate_user(
@@ -227,14 +272,19 @@ def login(
     "/token",
     response_model=TokenResponse,
 )
+@limiter.limit(
+    settings.auth_rate_limit
+)
 def oauth2_login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """
-    OAuth2-compatible login endpoint used by Swagger UI.
+    OAuth2-compatible authentication endpoint used by
+    Swagger UI.
 
-    OAuth2 calls the identity field "username". Harbor uses
-    email addresses, so username is treated as the email.
+    OAuth2 calls the identity field 'username'; Harbor treats
+    it as the user's email address.
     """
 
     user = authenticate_user(
@@ -257,8 +307,7 @@ def get_me(
     ),
 ):
     """
-    Return the currently authenticated Harbor user,
-    including the user's current authorization role.
+    Return the currently authenticated Harbor user.
     """
 
     return UserResponse(
@@ -267,6 +316,8 @@ def get_me(
         full_name=current_user.get(
             "full_name"
         ),
-        is_active=current_user["is_active"],
+        is_active=current_user[
+            "is_active"
+        ],
         role=current_user["role"],
     )

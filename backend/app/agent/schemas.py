@@ -1,6 +1,9 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    Field,
+)
 
 from app.schemas.rag import Citation
 
@@ -9,17 +12,12 @@ class AgentDecision(BaseModel):
     """
     Structured decision produced by Harbor's routing model.
 
-    The router makes two separate decisions:
+    action:
+        What Harbor should do next.
 
-    1. action:
-       What Harbor should do next.
-
-    2. answer_source:
-       Where Harbor should obtain information when the
-       selected action is "answer".
-
-    Keeping these decisions separate prevents conversation
-    memory from being treated as authoritative KB evidence.
+    answer_source:
+        Which trusted information source should handle an
+        answer request.
     """
 
     action: Literal[
@@ -53,7 +51,7 @@ class AgentDecision(BaseModel):
 
 class AgentRequest(BaseModel):
     """
-    Request accepted by Harbor's agent endpoint.
+    Request accepted by Harbor's support-agent endpoint.
     """
 
     message: str = Field(
@@ -61,15 +59,17 @@ class AgentRequest(BaseModel):
         max_length=4000,
     )
 
-    conversation_id: str | None = None
+    conversation_id: (
+        str | None
+    ) = None
 
 
 class AgentResponse(BaseModel):
     """
-    Response returned by Harbor's agent endpoint.
+    Safe customer-facing response returned by Harbor.
 
-    answer_source remains an internal orchestration detail
-    for now and is therefore not exposed through this model.
+    Ticket fields are populated only when Harbor has
+    successfully persisted a real internal escalation ticket.
     """
 
     answer: str
@@ -87,12 +87,32 @@ class AgentResponse(BaseModel):
         "critical",
     ]
 
-    citations: list[Citation] = Field(
-        default_factory=list
+    citations: list[Citation] = (
+        Field(
+            default_factory=list
+        )
     )
 
-    escalation_required: bool = False
+    escalation_required: (
+        bool
+    ) = False
 
-    # Returned so the frontend can continue the same
-    # conversation.
-    conversation_id: str | None = None
+    conversation_id: (
+        str | None
+    ) = None
+
+    # --------------------------------------------------------
+    # Escalation information
+    # --------------------------------------------------------
+
+    ticket_id: (
+        str | None
+    ) = None
+
+    ticket_status: (
+        str | None
+    ) = None
+
+    approval_status: (
+        str | None
+    ) = None

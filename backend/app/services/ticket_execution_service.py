@@ -1,23 +1,36 @@
+import logging
 from typing import Any
 
 from app.agent.tools import (
     authorize_approved_tool_execution,
 )
+
 from app.integrations.monday import (
     MondayAPIError,
     create_support_ticket_item,
     find_support_ticket_by_idempotency_key,
 )
+
+from app.integrations.n8n import (
+    N8NConfigurationError,
+    N8NWebhookError,
+    send_ticket_execution_event,
+)
+
 from app.repositories.ticket_repository import (
     claim_ticket_for_execution,
     get_ticket_for_review,
     mark_ticket_executed,
     recover_stale_execution_claim,
 )
+
 from app.tickets.execution_lease import (
     InvalidExecutionLeaseError,
     is_execution_lease_stale,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class TicketExecutionNotFoundError(Exception):
@@ -27,7 +40,9 @@ class TicketExecutionNotFoundError(Exception):
     """
 
 
-class TicketNotApprovedForExecutionError(Exception):
+class TicketNotApprovedForExecutionError(
+    Exception
+):
     """
     Raised when a support ticket has not received persisted
     human approval.
@@ -46,6 +61,7 @@ class TicketExecutionClaimError(Exception):
     Raised when Harbor cannot obtain execution ownership.
 
     This includes:
+
     - losing the initial approved -> executing claim;
     - attempting to take over an active lease;
     - losing a stale-lease recovery race;
@@ -53,14 +69,18 @@ class TicketExecutionClaimError(Exception):
     """
 
 
-class TicketExternalExecutionError(Exception):
+class TicketExternalExecutionError(
+    Exception
+):
     """
     Raised when Harbor owns execution but cannot safely
     communicate with Monday.com.
     """
 
 
-class TicketExecutionPersistenceError(Exception):
+class TicketExecutionPersistenceError(
+    Exception
+):
     """
     Raised when Monday.com contains the external item but
     Harbor cannot persist the synchronized result.
@@ -76,21 +96,19 @@ def get_ticket_for_execution(
 
     Human approval must remain persisted as approved.
 
-    Two workflow states are accepted here:
+    Valid workflow states:
 
         approved
             Normal first execution.
 
         executing
             Possible stale-lease recovery.
-
-    Accepting ``executing`` here does NOT grant execution
-    ownership. An executing ticket must still pass lease
-    validation and atomic stale-claim takeover before any
-    Monday.com operation occurs.
     """
 
-    if not isinstance(ticket_id, str):
+    if not isinstance(
+        ticket_id,
+        str,
+    ):
         raise TypeError(
             "ticket_id must be a string."
         )
@@ -111,27 +129,40 @@ def get_ticket_for_execution(
             "Support ticket was not found."
         )
 
-    if ticket.get("approval_status") != "approved":
-        raise TicketNotApprovedForExecutionError(
-            "Support ticket has not been approved "
-            "for external execution."
+    if (
+        ticket.get(
+            "approval_status"
+        )
+        != "approved"
+    ):
+        raise (
+            TicketNotApprovedForExecutionError(
+                "Support ticket has not been "
+                "approved for external execution."
+            )
         )
 
-    if ticket.get("monday_item_id"):
+    if ticket.get(
+        "monday_item_id"
+    ):
         raise TicketAlreadyExecutedError(
             "Support ticket has already been "
             "executed externally."
         )
 
-    ticket_status = ticket.get("status")
+    ticket_status = ticket.get(
+        "status"
+    )
 
     if ticket_status not in {
         "approved",
         "executing",
     }:
-        raise TicketNotApprovedForExecutionError(
-            "Support ticket is not in an executable "
-            "workflow state."
+        raise (
+            TicketNotApprovedForExecutionError(
+                "Support ticket is not in an "
+                "executable workflow state."
+            )
         )
 
     return ticket
@@ -146,19 +177,20 @@ def authorize_ticket_execution(
 
     Persisted human approval is checked before Harbor's
     centralized write-tool authorization policy.
-
-    This function performs no external side effect and does
-    not itself grant execution ownership.
     """
 
-    ticket = get_ticket_for_execution(
-        ticket_id=ticket_id
+    ticket = (
+        get_ticket_for_execution(
+            ticket_id=ticket_id
+        )
     )
 
     authorize_approved_tool_execution(
         "create_escalation",
         approval_status=(
-            ticket["approval_status"]
+            ticket[
+                "approval_status"
+            ]
         ),
     )
 
@@ -172,38 +204,47 @@ def claim_authorized_ticket(
     """
     Obtain execution ownership for an authorized ticket.
 
-    For a new approved ticket:
+    New ticket:
 
         approved
-            ↓ atomic claim
-        executing + new claim ID
-
-    For an already executing ticket:
-
-        inspect lease
             ↓
-        active → reject
-        stale  → atomic compare-and-swap takeover
+        atomic claim
+            ↓
+        executing
 
-    No Monday.com operation is allowed until this function
-    returns a trusted claimed ticket.
+    Recovery:
+
+        executing
+            ↓
+        check lease
+            ↓
+        stale?
+            ↓
+        compare-and-swap claim recovery
     """
 
-    ticket_id = ticket.get("id")
+    ticket_id = ticket.get(
+        "id"
+    )
 
     if ticket_id is None:
         raise TicketExecutionClaimError(
-            "Authorized support ticket does not contain "
-            "a valid ticket ID."
+            "Authorized support ticket does not "
+            "contain a valid ticket ID."
         )
 
-    ticket_id = str(ticket_id)
+    ticket_id = str(
+        ticket_id
+    )
 
     ticket_status = ticket.get(
         "status"
     )
 
-    # Normal first execution.
+    # --------------------------------------------------------
+    # Normal first execution
+    # --------------------------------------------------------
+
     if ticket_status == "approved":
         claimed_ticket = (
             claim_ticket_for_execution(
@@ -213,20 +254,27 @@ def claim_authorized_ticket(
 
         if claimed_ticket is None:
             raise TicketExecutionClaimError(
-                "Support ticket could not be claimed for "
-                "external execution."
+                "Support ticket could not be "
+                "claimed for external execution."
             )
 
         return claimed_ticket
 
-    # Recovery path.
+    # --------------------------------------------------------
+    # Stale execution recovery
+    # --------------------------------------------------------
+
     if ticket_status == "executing":
-        previous_claim_id = ticket.get(
-            "execution_claim_id"
+        previous_claim_id = (
+            ticket.get(
+                "execution_claim_id"
+            )
         )
 
-        execution_started_at = ticket.get(
-            "execution_started_at"
+        execution_started_at = (
+            ticket.get(
+                "execution_started_at"
+            )
         )
 
         if (
@@ -237,8 +285,9 @@ def claim_authorized_ticket(
             or not previous_claim_id.strip()
         ):
             raise TicketExecutionClaimError(
-                "Executing support ticket does not contain "
-                "a valid execution claim ID."
+                "Executing support ticket does "
+                "not contain a valid execution "
+                "claim ID."
             )
 
         if (
@@ -249,8 +298,9 @@ def claim_authorized_ticket(
             or not execution_started_at.strip()
         ):
             raise TicketExecutionClaimError(
-                "Executing support ticket does not contain "
-                "a valid execution start timestamp."
+                "Executing support ticket does "
+                "not contain a valid execution "
+                "start timestamp."
             )
 
         previous_claim_id = (
@@ -262,31 +312,30 @@ def claim_authorized_ticket(
         )
 
         try:
-            stale = is_execution_lease_stale(
-                execution_started_at=(
-                    execution_started_at
+            stale = (
+                is_execution_lease_stale(
+                    execution_started_at=(
+                        execution_started_at
+                    )
                 )
             )
+
         except (
             InvalidExecutionLeaseError,
             TypeError,
         ) as exc:
             raise TicketExecutionClaimError(
-                "Executing support ticket contains "
-                "invalid execution lease metadata."
+                "Executing support ticket "
+                "contains invalid execution "
+                "lease metadata."
             ) from exc
 
         if not stale:
             raise TicketExecutionClaimError(
-                "Support ticket is currently being "
-                "executed by another worker."
+                "Support ticket is currently "
+                "being executed by another worker."
             )
 
-        # The lease is stale according to Harbor's policy.
-        #
-        # We still do not own execution until the database
-        # compare-and-swap succeeds using the exact previous
-        # claim ID that we inspected.
         recovered_ticket = (
             recover_stale_execution_claim(
                 ticket_id=ticket_id,
@@ -298,17 +347,15 @@ def claim_authorized_ticket(
 
         if recovered_ticket is None:
             raise TicketExecutionClaimError(
-                "Stale support ticket execution claim "
-                "could not be recovered."
+                "Stale support ticket execution "
+                "claim could not be recovered."
             )
 
         return recovered_ticket
 
-    # Defensive fallback. get_ticket_for_execution() should
-    # already prevent this state from reaching here.
     raise TicketExecutionClaimError(
-        "Support ticket is not in a claimable "
-        "execution state."
+        "Support ticket is not in a "
+        "claimable execution state."
     )
 
 
@@ -317,14 +364,14 @@ def get_execution_claim_id(
     ticket: dict[str, Any],
 ) -> str:
     """
-    Extract execution ownership from the trusted database
-    record returned by either normal claim or stale takeover.
-
-    This value never comes from user input.
+    Extract execution ownership from Harbor's trusted
+    persisted ticket record.
     """
 
-    execution_claim_id = ticket.get(
-        "execution_claim_id"
+    execution_claim_id = (
+        ticket.get(
+            "execution_claim_id"
+        )
     )
 
     if (
@@ -335,11 +382,13 @@ def get_execution_claim_id(
         or not execution_claim_id.strip()
     ):
         raise TicketExecutionClaimError(
-            "Claimed support ticket does not contain "
-            "a valid execution claim ID."
+            "Claimed support ticket does not "
+            "contain a valid execution claim ID."
         )
 
-    return execution_claim_id.strip()
+    return (
+        execution_claim_id.strip()
+    )
 
 
 def execute_approved_ticket(
@@ -347,47 +396,32 @@ def execute_approved_ticket(
     ticket_id: str,
 ) -> dict[str, Any]:
     """
-    Safely execute or recover one approved Harbor escalation.
+    Safely execute one approved Harbor escalation.
 
-    Normal path:
+    Final architecture:
 
-        approved
-            ↓
-        atomic claim
-            ↓
-        executing
-            ↓
-        Monday lookup/create
-            ↓
-        claim-owned finalization
-            ↓
-        open
+        Human Approval
+              ↓
+        Atomic Claim
+              ↓
+        Monday Lookup
+              ↓
+        Reuse / Create
+              ↓
+        Harbor Finalization
+              ↓
+        n8n Cloud
+          ┌───┼────┐
+          ↓   ↓    ↓
+        Gmail Audit Snowflake
 
-    Recovery path:
-
-        executing
-            ↓
-        stale lease check
-            ↓
-        atomic claim takeover
-            ↓
-        NEW execution claim
-            ↓
-        Monday idempotency lookup
-            ↓
-        existing item OR safe create
-            ↓
-        claim-owned finalization
-            ↓
-        open
-
-    An active execution lease is never stolen.
-
-    A stale ticket is never blindly reset to ``approved``.
-
-    Monday is always searched by Harbor's idempotency key
-    before a new external item is created.
+    n8n is intentionally invoked only AFTER Harbor safely
+    finalizes the Monday synchronization.
     """
+
+    # --------------------------------------------------------
+    # 1. Verify persisted approval and tool authorization
+    # --------------------------------------------------------
 
     authorized_ticket = (
         authorize_ticket_execution(
@@ -395,16 +429,14 @@ def execute_approved_ticket(
         )
     )
 
-    # This returns only after the worker has obtained trusted
-    # execution ownership through either:
-    #
-    # approved -> executing
-    #
-    # or:
-    #
-    # stale executing claim -> new executing claim
-    ticket = claim_authorized_ticket(
-        ticket=authorized_ticket
+    # --------------------------------------------------------
+    # 2. Obtain exclusive execution ownership
+    # --------------------------------------------------------
+
+    ticket = (
+        claim_authorized_ticket(
+            ticket=authorized_ticket
+        )
     )
 
     execution_claim_id = (
@@ -413,8 +445,14 @@ def execute_approved_ticket(
         )
     )
 
-    idempotency_key = ticket.get(
-        "idempotency_key"
+    # --------------------------------------------------------
+    # 3. Validate deterministic idempotency key
+    # --------------------------------------------------------
+
+    idempotency_key = (
+        ticket.get(
+            "idempotency_key"
+        )
     )
 
     if (
@@ -425,20 +463,19 @@ def execute_approved_ticket(
         or not idempotency_key.strip()
     ):
         raise TicketExternalExecutionError(
-            "Support ticket does not contain a valid "
-            "idempotency key."
+            "Support ticket does not contain "
+            "a valid idempotency key."
         )
 
     idempotency_key = (
         idempotency_key.strip()
     )
 
+    # --------------------------------------------------------
+    # 4. Monday.com lookup/create
+    # --------------------------------------------------------
+
     try:
-        # This lookup is essential for stale recovery.
-        #
-        # The previous worker may have successfully created
-        # the Monday item and crashed before Harbor persisted
-        # monday_item_id.
         monday_item = (
             find_support_ticket_by_idempotency_key(
                 idempotency_key=(
@@ -448,17 +485,20 @@ def execute_approved_ticket(
         )
 
         if monday_item is None:
-            # No external item was found after this worker
-            # obtained execution ownership, so creation may
-            # proceed.
             monday_item = (
                 create_support_ticket_item(
-                    title=ticket["title"],
+                    title=(
+                        ticket["title"]
+                    ),
                     description=(
-                        ticket["description"]
+                        ticket[
+                            "description"
+                        ]
                     ),
                     severity=(
-                        ticket["severity"]
+                        ticket[
+                            "severity"
+                        ]
                     ),
                     harbor_ticket_id=str(
                         ticket["id"]
@@ -470,23 +510,33 @@ def execute_approved_ticket(
             )
 
     except MondayAPIError as exc:
-        # Keep the ticket executing.
-        #
-        # We cannot safely infer whether Monday accepted an
-        # external mutation when communication fails.
+        # Keep Harbor in executing state because the result
+        # of the external request may be uncertain.
         raise TicketExternalExecutionError(
-            "The approved support ticket could not be "
-            "safely synchronized with Monday.com."
+            "The approved support ticket "
+            "could not be safely synchronized "
+            "with Monday.com."
         ) from exc
 
-    monday_item_id = monday_item.get(
-        "id"
+    # --------------------------------------------------------
+    # 5. Validate Monday result
+    # --------------------------------------------------------
+
+    monday_item_id = (
+        monday_item.get(
+            "id"
+        )
     )
 
     if not monday_item_id:
         raise TicketExternalExecutionError(
-            "Monday.com did not return a valid item ID."
+            "Monday.com did not return "
+            "a valid item ID."
         )
+
+    # --------------------------------------------------------
+    # 6. Finalize Harbor ticket
+    # --------------------------------------------------------
 
     executed_ticket = (
         mark_ticket_executed(
@@ -503,14 +553,55 @@ def execute_approved_ticket(
     )
 
     if executed_ticket is None:
-        # Either persistence failed or execution ownership
-        # changed before finalization.
-        #
-        # Monday may already contain the item, so never
-        # blindly issue another external create here.
         raise TicketExecutionPersistenceError(
-            "Monday.com contains the support item, but "
-            "Harbor could not persist the execution result."
+            "Monday.com contains the support "
+            "item, but Harbor could not persist "
+            "the execution result."
         )
+
+    # --------------------------------------------------------
+    # 7. Dispatch downstream automation event to n8n Cloud
+    # --------------------------------------------------------
+    #
+    # Important:
+    #
+    # Monday + Harbor execution is already successful.
+    #
+    # If Gmail, Supabase audit, Snowflake, or n8n itself is
+    # temporarily unavailable, Harbor must NOT recreate the
+    # Monday item.
+    #
+    # Therefore downstream automation failure is logged but
+    # does not invalidate the completed ticket execution.
+    try:
+        send_ticket_execution_event(
+            executed_ticket
+        )
+
+    except N8NConfigurationError:
+        logger.exception(
+            (
+                "Ticket execution completed but n8n "
+                "Cloud is not configured. ticket_id=%s"
+            ),
+            executed_ticket.get(
+                "id"
+            ),
+        )
+
+    except N8NWebhookError:
+        logger.exception(
+            (
+                "Ticket execution completed but n8n "
+                "Cloud delivery failed. ticket_id=%s"
+            ),
+            executed_ticket.get(
+                "id"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 8. Return completed Harbor ticket
+    # --------------------------------------------------------
 
     return executed_ticket

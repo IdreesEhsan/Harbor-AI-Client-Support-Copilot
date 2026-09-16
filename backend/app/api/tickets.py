@@ -21,6 +21,8 @@ from app.services.ticket_service import (
     TicketAlreadyDecidedError,
     TicketNotFoundError,
     decide_ticket_approval,
+    list_staff_tickets,
+    review_ticket,
 )
 from app.tickets.schemas import (
     TicketApprovalRequest,
@@ -32,6 +34,72 @@ from app.tickets.schemas import (
 router = APIRouter(
     prefix="/tickets"
 )
+
+
+# ============================================================
+# Staff Ticket Queries
+# ============================================================
+
+
+@router.get(
+    "",
+    response_model=list[TicketRecord],
+)
+def list_tickets(
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    """
+    Return Harbor's support queue for authorized staff.
+
+    Support agents and administrators may view customer
+    escalation tickets regardless of ticket ownership.
+
+    Backend RBAC remains the real security boundary.
+    """
+
+    return list_staff_tickets()
+
+
+@router.get(
+    "/{ticket_id}",
+    response_model=TicketRecord,
+)
+def get_ticket(
+    ticket_id: UUID,
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    """
+    Return one Harbor support ticket for authorized staff.
+
+    Staff users are intentionally allowed to review tickets
+    created by customers.
+    """
+
+    try:
+        return review_ticket(
+            ticket_id=str(ticket_id)
+        )
+
+    except TicketNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+# ============================================================
+# Human Approval
+# ============================================================
 
 
 @router.post(
@@ -51,12 +119,10 @@ def decide_ticket(
     """
     Approve or reject a pending Harbor support ticket.
 
-    Only authenticated support agents and administrators may
-    make this decision.
+    This endpoint only modifies Harbor's internal workflow
+    state.
 
-    This endpoint changes Harbor's internal approval state
-    only. It does not execute Monday.com, n8n, notification,
-    or other external side effects.
+    It does not execute Monday.com or trigger n8n.
     """
 
     try:
@@ -70,19 +136,20 @@ def decide_ticket(
 
     except TicketNotFoundError as exc:
         raise HTTPException(
-            status_code=(
-                status.HTTP_404_NOT_FOUND
-            ),
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
 
     except TicketAlreadyDecidedError as exc:
         raise HTTPException(
-            status_code=(
-                status.HTTP_409_CONFLICT
-            ),
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+
+
+# ============================================================
+# Approved Ticket Execution
+# ============================================================
 
 
 @router.post(
@@ -101,32 +168,21 @@ def execute_ticket(
     """
     Execute an approved Harbor support ticket.
 
-    Only authenticated support agents and administrators may
-    trigger this endpoint.
-
-    Execution is still controlled by Harbor's trusted
-    persisted state. Calling this endpoint does not bypass
-    human approval.
-
     Safe execution flow:
 
-        persisted approval
+        persisted human approval
                 ↓
-        tool authorization
+        execution authorization
                 ↓
         atomic execution claim
                 ↓
         Monday idempotency lookup
                 ↓
-        reuse existing item OR create item
+        reuse or create Monday item
                 ↓
         claim-owned finalization
                 ↓
         Harbor ticket becomes open
-
-    An executing ticket with an active lease cannot be
-    stolen. A stale execution may be recovered through the
-    controlled lease-recovery mechanism.
     """
 
     try:
@@ -136,9 +192,7 @@ def execute_ticket(
 
     except TicketExecutionNotFoundError as exc:
         raise HTTPException(
-            status_code=(
-                status.HTTP_404_NOT_FOUND
-            ),
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
 
@@ -147,41 +201,19 @@ def execute_ticket(
         TicketAlreadyExecutedError,
         TicketExecutionClaimError,
     ) as exc:
-        # These are workflow-state conflicts rather than
-        # malformed requests.
-        #
-        # Examples:
-        # - approval has not occurred;
-        # - execution already completed;
-        # - another worker owns an active lease;
-        # - another worker won the claim race.
         raise HTTPException(
-            status_code=(
-                status.HTTP_409_CONFLICT
-            ),
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
 
     except TicketExternalExecutionError as exc:
-        # Harbor was allowed to execute, but the external
-        # Monday operation could not be completed safely.
         raise HTTPException(
-            status_code=(
-                status.HTTP_502_BAD_GATEWAY
-            ),
+            status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
 
     except TicketExecutionPersistenceError as exc:
-        # Monday may already contain the item, while Harbor
-        # failed to finalize its own state.
-        #
-        # We expose this as a server-side synchronization
-        # failure and must not blindly retry an external
-        # create operation.
         raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc

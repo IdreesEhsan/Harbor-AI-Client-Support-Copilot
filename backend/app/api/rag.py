@@ -2,18 +2,21 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
+    status,
 )
 
+from app.core.config import get_settings
+from app.core.rate_limit import limiter
+from app.dependencies.auth import get_current_user
 from app.rag.service import answer_question
 from app.schemas.rag import (
     RAGRequest,
     RAGResponse,
 )
 
-# Reuse the authentication dependency already created in Phase 3.
-# Change this import only if your existing auth dependency is located
-# in another module.
-from app.dependencies.auth import get_current_user
+
+settings = get_settings()
 
 
 router = APIRouter(
@@ -26,26 +29,81 @@ router = APIRouter(
     "/ask",
     response_model=RAGResponse,
 )
+@limiter.limit(
+    settings.rag_rate_limit
+)
 def ask_knowledge_base(
+    request: Request,
     payload: RAGRequest,
     current_user: dict = Depends(
         get_current_user
     ),
 ) -> RAGResponse:
     """
-    Answer an authenticated user's question with Harbor's RAG system.
+    Answer an authenticated question using Harbor's
+    grounded RAG system.
+
+    Production protections:
+    - authentication;
+    - request validation;
+    - rate limiting;
+    - defensive input-size limits;
+    - safe exception responses.
     """
 
     try:
-        return answer_question(
-            question=payload.question,
+        question = (
+            payload.question.strip()
         )
 
-    except Exception as exc:
-        # Provider/database internals should not be exposed to clients.
+        if not question:
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
+                detail=(
+                    "Question cannot be empty."
+                ),
+            )
+
+        if (
+            len(question)
+            > settings.llm_max_input_characters
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+                ),
+                detail=(
+                    "Question exceeds the maximum "
+                    "allowed input size."
+                ),
+            )
+
+        return answer_question(
+            question=question,
+        )
+
+    except HTTPException:
+        raise
+
+    except ValueError as exc:
         raise HTTPException(
-            status_code=500,
-            detail=(
-                "Unable to process the knowledge-base question."
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
             ),
-        ) from exc  
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        # Provider/database internals must never be returned
+        # directly to API clients.
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "Unable to process the "
+                "knowledge-base question."
+            ),
+        ) from exc

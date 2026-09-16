@@ -7,55 +7,181 @@ from pydantic_settings import (
 )
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = (
+    Path(__file__).resolve().parents[2]
+)
+
 ENV_FILE = BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
+    # ========================================================
+    # Application
+    # ========================================================
+
     app_name: str = "Harbor API"
+
     app_env: str = "development"
+
     api_prefix: str = "/api/v1"
+
     debug: bool = True
 
+    log_level: str = "INFO"
+
+    cors_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173"
+    )
+
+    # ========================================================
+    # Rate limiting
+    # ========================================================
+
+    # General API protection.
+    general_rate_limit: str = (
+        "120/minute"
+    )
+
+    # Expensive AI endpoint protection.
+    agent_rate_limit: str = (
+        "20/minute"
+    )
+
+    # Direct RAG endpoint protection.
+    rag_rate_limit: str = (
+        "30/minute"
+    )
+
+    # Authentication brute-force protection.
+    auth_rate_limit: str = (
+        "10/minute"
+    )
+
+    # ========================================================
+    # LLM usage controls
+    # ========================================================
+
+    # Hard maximum size already exists at the API schema
+    # level, but these settings document the production
+    # usage policy explicitly.
+    llm_max_input_characters: int = (
+        4000
+    )
+
+    # This is a simple application-level safety budget.
+    #
+    # Harbor already limits graph steps and tool calls.
+    # This provides an additional documented production
+    # usage control for the DevOrbis capstone.
+    llm_requests_per_user_per_minute: (
+        int
+    ) = 20
+
+    # ========================================================
     # Supabase
+    # ========================================================
+
     supabase_url: str
+
     supabase_service_role_key: str
 
+    # ========================================================
     # Authentication
-    jwt_secret_key: str
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
+    # ========================================================
 
+    jwt_secret_key: str
+
+    jwt_algorithm: str = "HS256"
+
+    jwt_access_token_expire_minutes: (
+        int
+    ) = 60
+
+    # ========================================================
     # Embeddings
+    # ========================================================
+
     embedding_model: str = (
-        "sentence-transformers/all-MiniLM-L6-v2"
+        "sentence-transformers/"
+        "all-MiniLM-L6-v2"
     )
+
     embedding_dimension: int = 384
 
+    # ========================================================
     # Groq
-    groq_api_key: str
-    groq_model: str = "llama-3.3-70b-versatile"
+    # ========================================================
 
+    groq_api_key: str
+
+    groq_model: str = (
+        "llama-3.3-70b-versatile"
+    )
+
+    # ========================================================
     # Conversation memory
+    # ========================================================
+
     memory_buffer_size: int = 8
+
     memory_summary_threshold: int = 12
 
-    # Monday.com integration
-    #
-    # Monday configuration is optional at application startup.
-    # The integration validates these values only when an
-    # external Monday operation is requested.
-    monday_api_token: str | None = None
-    monday_api_url: str = "https://api.monday.com/v2"
+    # ========================================================
+    # Monday.com
+    # ========================================================
 
-    monday_board_id: str | None = None
-    monday_group_id: str | None = None
+    monday_api_token: (
+        str | None
+    ) = None
 
-    monday_harbor_ticket_id_column_id: str | None = None
-    monday_status_column_id: str | None = None
-    monday_idempotency_key_column_id: str | None = None
-    monday_description_column_id: str | None = None
-    monday_severity_column_id: str | None = None
+    monday_api_url: str = (
+        "https://api.monday.com/v2"
+    )
+
+    monday_board_id: (
+        str | None
+    ) = None
+
+    monday_group_id: (
+        str | None
+    ) = None
+
+    monday_harbor_ticket_id_column_id: (
+        str | None
+    ) = None
+
+    monday_status_column_id: (
+        str | None
+    ) = None
+
+    monday_idempotency_key_column_id: (
+        str | None
+    ) = None
+
+    monday_description_column_id: (
+        str | None
+    ) = None
+
+    monday_severity_column_id: (
+        str | None
+    ) = None
+
+    # ========================================================
+    # n8n Cloud
+    # ========================================================
+
+    n8n_ticket_webhook_url: (
+        str | None
+    ) = None
+
+    n8n_webhook_timeout_seconds: (
+        float
+    ) = 10.0
+
+    # ========================================================
+    # Configuration helpers
+    # ========================================================
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -63,7 +189,33 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def get_cors_origins(
+        self,
+    ) -> list[str]:
+        """
+        Parse configured browser origins.
+        """
+
+        origins = [
+            origin.strip()
+            for origin
+            in self.cors_origins.split(",")
+            if origin.strip()
+        ]
+
+        if not origins:
+            raise ValueError(
+                "At least one CORS origin "
+                "must be configured."
+            )
+
+        return origins
+
 
 @lru_cache
 def get_settings() -> Settings:
+    """
+    Return cached Harbor settings.
+    """
+
     return Settings()
