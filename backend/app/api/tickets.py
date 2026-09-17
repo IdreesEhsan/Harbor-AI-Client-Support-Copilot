@@ -7,7 +7,10 @@ from fastapi import (
     status,
 )
 
-from app.dependencies.auth import require_roles
+from app.dependencies.auth import (
+    require_roles,
+)
+
 from app.services.ticket_execution_service import (
     TicketAlreadyExecutedError,
     TicketExecutionClaimError,
@@ -17,13 +20,17 @@ from app.services.ticket_execution_service import (
     TicketNotApprovedForExecutionError,
     execute_approved_ticket,
 )
+
 from app.services.ticket_service import (
     TicketAlreadyDecidedError,
     TicketNotFoundError,
     decide_ticket_approval,
+    get_user_ticket,
     list_staff_tickets,
+    list_user_tickets,
     review_ticket,
 )
+
 from app.tickets.schemas import (
     TicketApprovalRequest,
     TicketApprovalResult,
@@ -37,9 +44,79 @@ router = APIRouter(
 
 
 # ============================================================
-# Staff Ticket Queries
+# CUSTOMER — MY CASES
 # ============================================================
 
+@router.get(
+    "/mine",
+    response_model=list[TicketRecord],
+)
+def list_my_tickets(
+    current_user=Depends(
+        require_roles(
+            "customer",
+        )
+    ),
+):
+    """
+    Return support tickets belonging only to the
+    authenticated customer.
+
+    This powers Harbor's My Cases view.
+    """
+
+    return list_user_tickets(
+        user_id=str(
+            current_user["id"]
+        ),
+        limit=100,
+    )
+
+
+@router.get(
+    "/mine/{ticket_id}",
+    response_model=TicketRecord,
+)
+def get_my_ticket(
+    ticket_id: UUID,
+    current_user=Depends(
+        require_roles(
+            "customer",
+        )
+    ),
+):
+    """
+    Return one ticket belonging to the authenticated
+    customer.
+
+    Ownership is enforced using both ticket_id and user_id.
+    """
+
+    ticket = get_user_ticket(
+        ticket_id=str(
+            ticket_id
+        ),
+        user_id=str(
+            current_user["id"]
+        ),
+    )
+
+    if ticket is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=(
+                "Support ticket was not found."
+            ),
+        )
+
+    return ticket
+
+
+# ============================================================
+# STAFF — GLOBAL SUPPORT QUEUE
+# ============================================================
 
 @router.get(
     "",
@@ -54,15 +131,13 @@ def list_tickets(
     ),
 ):
     """
-    Return Harbor's support queue for authorized staff.
-
-    Support agents and administrators may view customer
-    escalation tickets regardless of ticket ownership.
-
-    Backend RBAC remains the real security boundary.
+    Return all Harbor support tickets visible to
+    authorized support staff.
     """
 
-    return list_staff_tickets()
+    return list_staff_tickets(
+        limit=100,
+    )
 
 
 @router.get(
@@ -79,32 +154,36 @@ def get_ticket(
     ),
 ):
     """
-    Return one Harbor support ticket for authorized staff.
-
-    Staff users are intentionally allowed to review tickets
-    created by customers.
+    Return one support ticket for authorized staff review.
     """
 
     try:
         return review_ticket(
-            ticket_id=str(ticket_id)
+            ticket_id=str(
+                ticket_id
+            )
         )
 
     except TicketNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
 
 # ============================================================
-# Human Approval
+# STAFF — HUMAN APPROVAL
 # ============================================================
-
 
 @router.post(
     "/{ticket_id}/approval",
-    response_model=TicketApprovalResult,
+    response_model=(
+        TicketApprovalResult
+    ),
 )
 def decide_ticket(
     ticket_id: UUID,
@@ -119,38 +198,49 @@ def decide_ticket(
     """
     Approve or reject a pending Harbor support ticket.
 
-    This endpoint only modifies Harbor's internal workflow
-    state.
+    Approval only changes Harbor's internal state.
 
-    It does not execute Monday.com or trigger n8n.
+    It does not execute Monday.com or another external
+    business action.
     """
 
     try:
         return decide_ticket_approval(
-            ticket_id=str(ticket_id),
+            ticket_id=str(
+                ticket_id
+            ),
             reviewer_id=str(
                 current_user["id"]
             ),
-            approved=payload.approved,
+            approved=(
+                payload.approved
+            ),
         )
 
     except TicketNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
     except TicketAlreadyDecidedError as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
 
 # ============================================================
-# Approved Ticket Execution
+# STAFF — APPROVED EXECUTION
 # ============================================================
-
 
 @router.post(
     "/{ticket_id}/execute",
@@ -166,34 +256,36 @@ def execute_ticket(
     ),
 ):
     """
-    Execute an approved Harbor support ticket.
+    Execute a previously approved Harbor support ticket.
 
-    Safe execution flow:
+    Controlled execution flow:
 
-        persisted human approval
-                ↓
+        human approval
+              ↓
         execution authorization
-                ↓
-        atomic execution claim
-                ↓
-        Monday idempotency lookup
-                ↓
-        reuse or create Monday item
-                ↓
-        claim-owned finalization
-                ↓
-        Harbor ticket becomes open
+              ↓
+        execution claim
+              ↓
+        Monday.com
+              ↓
+        Harbor finalization
     """
 
     try:
         return execute_approved_ticket(
-            ticket_id=str(ticket_id)
+            ticket_id=str(
+                ticket_id
+            )
         )
 
     except TicketExecutionNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
     except (
@@ -202,18 +294,30 @@ def execute_ticket(
         TicketExecutionClaimError,
     ) as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
     except TicketExternalExecutionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc
 
     except TicketExecutionPersistenceError as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=str(
+                exc
+            ),
         ) from exc

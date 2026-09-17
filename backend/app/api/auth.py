@@ -9,19 +9,28 @@ from fastapi.security import (
     OAuth2PasswordRequestForm,
 )
 
-from app.core.config import get_settings
-from app.core.rate_limit import limiter
-from app.db.supabase import get_supabase_client
-from app.dependencies.auth import get_current_user
+from app.core.config import (
+    get_settings,
+)
+from app.core.rate_limit import (
+    limiter,
+)
+from app.db.supabase import (
+    get_supabase_auth_client,
+    get_supabase_client,
+)
+from app.dependencies.auth import (
+    get_current_user,
+)
 from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
+    RegisterResponse,
     TokenResponse,
     UserResponse,
 )
 from app.services.auth import (
     create_access_token,
-    hash_password,
     verify_password,
 )
 
@@ -34,37 +43,35 @@ router = APIRouter(
 )
 
 
-def authenticate_user(
+def normalize_email(
     email: str,
-    password: str,
+) -> str:
+    return (
+        email
+        .strip()
+        .lower()
+    )
+
+
+def get_harbor_user_by_email(
+    email: str,
 ):
-    """
-    Authenticate a Harbor user using email and password.
-
-    Used by both React JSON login and Swagger OAuth2 login.
-    """
-
-    email = email.strip().lower()
-
-    if not email:
-        raise HTTPException(
-            status_code=(
-                status.HTTP_401_UNAUTHORIZED
-            ),
-            detail="Invalid email or password",
-            headers={
-                "WWW-Authenticate": "Bearer"
-            },
-        )
-
-    supabase = get_supabase_client()
+    supabase = (
+        get_supabase_client()
+    )
 
     response = (
         supabase
         .table("users")
         .select(
-            "id,email,password_hash,"
-            "full_name,is_active,role"
+            "id,"
+            "email,"
+            "password_hash,"
+            "full_name,"
+            "age,"
+            "country,"
+            "is_active,"
+            "role"
         )
         .eq(
             "email",
@@ -75,50 +82,202 @@ def authenticate_user(
     )
 
     if not response.data:
+        return None
+
+    return response.data[0]
+
+
+def authenticate_legacy_user(
+    user: dict,
+    password: str,
+):
+    """
+    Support old Harbor bcrypt accounts during migration.
+    """
+
+    password_hash = (
+        user.get(
+            "password_hash"
+        )
+    )
+
+    if not password_hash:
         raise HTTPException(
             status_code=(
                 status.HTTP_401_UNAUTHORIZED
             ),
-            detail="Invalid email or password",
-            headers={
-                "WWW-Authenticate": "Bearer"
-            },
+            detail=(
+                "Invalid email or password."
+            ),
         )
-
-    user = response.data[0]
 
     if not verify_password(
         password,
-        user["password_hash"],
+        password_hash,
     ):
         raise HTTPException(
             status_code=(
                 status.HTTP_401_UNAUTHORIZED
             ),
-            detail="Invalid email or password",
-            headers={
-                "WWW-Authenticate": "Bearer"
-            },
-        )
-
-    if not user["is_active"]:
-        raise HTTPException(
-            status_code=(
-                status.HTTP_403_FORBIDDEN
+            detail=(
+                "Invalid email or password."
             ),
-            detail="User account is inactive",
         )
 
     return user
 
 
+def authenticate_supabase_user(
+    email: str,
+    password: str,
+):
+    """
+    Authenticate a Supabase-managed Harbor user.
+
+    Supabase handles both password verification and
+    confirmed-email enforcement.
+    """
+
+    auth_client = (
+        get_supabase_auth_client()
+    )
+
+    try:
+        response = (
+            auth_client
+            .auth
+            .sign_in_with_password(
+                {
+                    "email": email,
+                    "password": password,
+                }
+            )
+        )
+
+    except Exception as exc:
+        error_text = (
+            str(exc).lower()
+        )
+
+        if (
+            "email not confirmed"
+            in error_text
+            or "email_not_confirmed"
+            in error_text
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_403_FORBIDDEN
+                ),
+                detail=(
+                    "Please verify your email "
+                    "before signing in."
+                ),
+            ) from exc
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            detail=(
+                "Invalid email or password."
+            ),
+        ) from exc
+
+    if not response.user:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            detail=(
+                "Invalid email or password."
+            ),
+        )
+
+    return response.user
+
+
+def authenticate_user(
+    email: str,
+    password: str,
+):
+    normalized_email = (
+        normalize_email(
+            email
+        )
+    )
+
+    harbor_user = (
+        get_harbor_user_by_email(
+            normalized_email
+        )
+    )
+
+    if not harbor_user:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            detail=(
+                "Invalid email or password."
+            ),
+        )
+
+    if not harbor_user[
+        "is_active"
+    ]:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail=(
+                "User account is inactive."
+            ),
+        )
+
+    # Legacy account:
+    # password still stored in Harbor.
+    if harbor_user.get(
+        "password_hash"
+    ):
+        return (
+            authenticate_legacy_user(
+                harbor_user,
+                password,
+            )
+        )
+
+    # Modern account:
+    # password + email confirmation are owned by Supabase.
+    auth_user = (
+        authenticate_supabase_user(
+            normalized_email,
+            password,
+        )
+    )
+
+    if (
+        str(auth_user.id)
+        != str(
+            harbor_user["id"]
+        )
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            detail=(
+                "Authentication identity does "
+                "not match Harbor profile."
+            ),
+        )
+
+    return harbor_user
+
+
 def build_token_response(
     user: dict,
 ) -> TokenResponse:
-    """
-    Create Harbor's JWT authentication response.
-    """
-
     access_token, expires_in = (
         create_access_token(
             user_id=user["id"],
@@ -136,7 +295,15 @@ def build_token_response(
             full_name=user.get(
                 "full_name"
             ),
-            is_active=user["is_active"],
+            age=user.get(
+                "age"
+            ),
+            country=user.get(
+                "country"
+            ),
+            is_active=user[
+                "is_active"
+            ],
             role=user["role"],
         ),
     )
@@ -144,7 +311,7 @@ def build_token_response(
 
 @router.post(
     "/register",
-    response_model=UserResponse,
+    response_model=RegisterResponse,
     status_code=(
         status.HTTP_201_CREATED
     ),
@@ -157,22 +324,54 @@ def register(
     payload: RegisterRequest,
 ):
     """
-    Register a Harbor customer.
+    Public customer registration.
 
-    Public registration is deliberately restricted to the
-    customer role. Privileged roles cannot be self-assigned.
+    Every public registration becomes customer.
+    Staff email can never be registered publicly.
     """
 
-    supabase = (
+    normalized_email = (
+        normalize_email(
+            str(
+                payload.email
+            )
+        )
+    )
+
+    reserved_staff_email = (
+        normalize_email(
+            settings.staff_email
+        )
+    )
+
+    # --------------------------------------------------------
+    # Staff protection
+    # --------------------------------------------------------
+
+    if (
+        normalized_email
+        == reserved_staff_email
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail=(
+                "This email address is reserved "
+                "for Harbor staff."
+            ),
+        )
+
+    service_client = (
         get_supabase_client()
     )
 
-    normalized_email = (
-        payload.email.strip().lower()
-    )
+    # --------------------------------------------------------
+    # Harbor duplicate profile check
+    # --------------------------------------------------------
 
-    existing_user = (
-        supabase
+    existing_profile = (
+        service_client
         .table("users")
         .select("id")
         .eq(
@@ -183,61 +382,214 @@ def register(
         .execute()
     )
 
-    if existing_user.data:
+    if existing_profile.data:
         raise HTTPException(
             status_code=(
                 status.HTTP_409_CONFLICT
             ),
             detail=(
-                "User with this email "
-                "already exists"
+                "An account with this email "
+                "already exists."
             ),
         )
 
-    password_hash = (
-        hash_password(
-            payload.password
-        )
+    # --------------------------------------------------------
+    # Supabase Auth registration
+    # --------------------------------------------------------
+
+    auth_client = (
+        get_supabase_auth_client()
     )
 
-    response = (
-        supabase
-        .table("users")
-        .insert(
-            {
-                "email": (
-                    normalized_email
-                ),
-                "password_hash": (
-                    password_hash
-                ),
-                "full_name": (
-                    payload.full_name
-                ),
-                "role": "customer",
-            }
-        )
-        .execute()
+    verification_redirect = (
+        settings
+        .frontend_base_url
+        .rstrip("/")
+        + "/verify-email"
     )
 
-    if not response.data:
+    try:
+        auth_response = (
+            auth_client
+            .auth
+            .sign_up(
+                {
+                    "email": (
+                        normalized_email
+                    ),
+                    "password": (
+                        payload.password
+                    ),
+                    "options": {
+                        "email_redirect_to": (
+                            verification_redirect
+                        ),
+                        "data": {
+                            "full_name": (
+                                payload
+                                .full_name
+                                .strip()
+                            ),
+                            "age": (
+                                payload.age
+                            ),
+                            "country": (
+                                payload
+                                .country
+                                .strip()
+                            ),
+                        },
+                    },
+                }
+            )
+        )
+
+    except Exception as exc:
+        error_text = (
+            str(exc)
+        )
+
+        if (
+            "already registered"
+            in error_text.lower()
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_409_CONFLICT
+                ),
+                detail=(
+                    "An account with this email "
+                    "already exists."
+                ),
+            ) from exc
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Unable to create account. "
+                "Please check your information "
+                "and try again."
+            ),
+        ) from exc
+
+    auth_user = (
+        auth_response.user
+    )
+
+    if not auth_user:
         raise HTTPException(
             status_code=(
                 status.HTTP_500_INTERNAL_SERVER_ERROR
             ),
-            detail="Could not create user",
+            detail=(
+                "Supabase did not return "
+                "a user account."
+            ),
         )
 
-    user = response.data[0]
+    auth_user_id = str(
+        auth_user.id
+    )
 
-    return UserResponse(
-        id=user["id"],
-        email=user["email"],
-        full_name=user.get(
-            "full_name"
+    # --------------------------------------------------------
+    # Create Harbor profile
+    # --------------------------------------------------------
+
+    try:
+        profile_response = (
+            service_client
+            .table("users")
+            .insert(
+                {
+                    "id": (
+                        auth_user_id
+                    ),
+                    "email": (
+                        normalized_email
+                    ),
+
+                    # New accounts use Supabase Auth.
+                    "password_hash": None,
+
+                    "full_name": (
+                        payload
+                        .full_name
+                        .strip()
+                    ),
+                    "age": (
+                        payload.age
+                    ),
+                    "country": (
+                        payload
+                        .country
+                        .strip()
+                    ),
+                    "is_active": True,
+
+                    # CRITICAL:
+                    # public registration is always customer.
+                    "role": "customer",
+                }
+            )
+            .execute()
+        )
+
+    except Exception as exc:
+        # Avoid orphan auth account if Harbor profile fails.
+        try:
+            (
+                service_client
+                .auth
+                .admin
+                .delete_user(
+                    auth_user_id
+                )
+            )
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "Harbor could not create "
+                "your customer profile."
+            ),
+        ) from exc
+
+    if not profile_response.data:
+        try:
+            (
+                service_client
+                .auth
+                .admin
+                .delete_user(
+                    auth_user_id
+                )
+            )
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "Harbor could not create "
+                "your customer profile."
+            ),
+        )
+
+    return RegisterResponse(
+        message=(
+            "Verification link sent. "
+            "Please check your email."
         ),
-        is_active=user["is_active"],
-        role=user["role"],
+        email=normalized_email,
+        verification_required=True,
     )
 
 
@@ -252,14 +604,10 @@ def login(
     request: Request,
     payload: LoginRequest,
 ):
-    """
-    JSON login endpoint used by Harbor's React frontend.
-
-    Rate limiting reduces brute-force login attempts.
-    """
-
     user = authenticate_user(
-        email=payload.email,
+        email=str(
+            payload.email
+        ),
         password=payload.password,
     )
 
@@ -279,14 +627,6 @@ def oauth2_login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
-    """
-    OAuth2-compatible authentication endpoint used by
-    Swagger UI.
-
-    OAuth2 calls the identity field 'username'; Harbor treats
-    it as the user's email address.
-    """
-
     user = authenticate_user(
         email=form_data.username,
         password=form_data.password,
@@ -306,15 +646,17 @@ def get_me(
         get_current_user
     ),
 ):
-    """
-    Return the currently authenticated Harbor user.
-    """
-
     return UserResponse(
         id=current_user["id"],
         email=current_user["email"],
         full_name=current_user.get(
             "full_name"
+        ),
+        age=current_user.get(
+            "age"
+        ),
+        country=current_user.get(
+            "country"
         ),
         is_active=current_user[
             "is_active"

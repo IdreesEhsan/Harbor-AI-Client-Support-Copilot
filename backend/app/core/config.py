@@ -34,49 +34,41 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173"
     )
 
+    frontend_base_url: str = (
+        "http://localhost:5173"
+    )
+
     # ========================================================
     # Rate limiting
     # ========================================================
 
-    # General API protection.
     general_rate_limit: str = (
         "120/minute"
     )
 
-    # Expensive AI endpoint protection.
     agent_rate_limit: str = (
         "20/minute"
     )
 
-    # Direct RAG endpoint protection.
     rag_rate_limit: str = (
         "30/minute"
     )
 
-    # Authentication brute-force protection.
     auth_rate_limit: str = (
         "10/minute"
     )
 
     # ========================================================
-    # LLM usage controls
+    # LLM usage
     # ========================================================
 
-    # Hard maximum size already exists at the API schema
-    # level, but these settings document the production
-    # usage policy explicitly.
     llm_max_input_characters: int = (
         4000
     )
 
-    # This is a simple application-level safety budget.
-    #
-    # Harbor already limits graph steps and tool calls.
-    # This provides an additional documented production
-    # usage control for the DevOrbis capstone.
-    llm_requests_per_user_per_minute: (
-        int
-    ) = 20
+    llm_requests_per_user_per_minute: int = (
+        20
+    )
 
     # ========================================================
     # Supabase
@@ -86,6 +78,14 @@ class Settings(BaseSettings):
 
     supabase_service_role_key: str
 
+    supabase_anon_key: str
+
+    # ========================================================
+    # Harbor Staff
+    # ========================================================
+
+    staff_email: str
+
     # ========================================================
     # Authentication
     # ========================================================
@@ -94,9 +94,9 @@ class Settings(BaseSettings):
 
     jwt_algorithm: str = "HS256"
 
-    jwt_access_token_expire_minutes: (
-        int
-    ) = 60
+    jwt_access_token_expire_minutes: int = (
+        60
+    )
 
     # ========================================================
     # Embeddings
@@ -131,21 +131,15 @@ class Settings(BaseSettings):
     # Monday.com
     # ========================================================
 
-    monday_api_token: (
-        str | None
-    ) = None
+    monday_api_token: str | None = None
 
     monday_api_url: str = (
         "https://api.monday.com/v2"
     )
 
-    monday_board_id: (
-        str | None
-    ) = None
+    monday_board_id: str | None = None
 
-    monday_group_id: (
-        str | None
-    ) = None
+    monday_group_id: str | None = None
 
     monday_harbor_ticket_id_column_id: (
         str | None
@@ -168,16 +162,16 @@ class Settings(BaseSettings):
     ) = None
 
     # ========================================================
-    # n8n Cloud
+    # n8n
     # ========================================================
 
     n8n_ticket_webhook_url: (
         str | None
     ) = None
 
-    n8n_webhook_timeout_seconds: (
-        float
-    ) = 10.0
+    n8n_webhook_timeout_seconds: float = (
+        10.0
+    )
 
     # ========================================================
     # Configuration helpers
@@ -192,10 +186,6 @@ class Settings(BaseSettings):
     def get_cors_origins(
         self,
     ) -> list[str]:
-        """
-        Parse configured browser origins.
-        """
-
         origins = [
             origin.strip()
             for origin
@@ -214,8 +204,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """
-    Return cached Harbor settings.
-    """
-
     return Settings()
