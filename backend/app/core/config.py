@@ -8,26 +8,44 @@ from pydantic_settings import (
 
 
 BACKEND_DIR = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__)
+    .resolve()
+    .parents[2]
 )
 
-ENV_FILE = BACKEND_DIR / ".env"
+
+ENV_FILE = (
+    BACKEND_DIR
+    / ".env"
+)
 
 
-class Settings(BaseSettings):
+class Settings(
+    BaseSettings
+):
     # ========================================================
     # Application
     # ========================================================
 
-    app_name: str = "Harbor API"
+    app_name: str = (
+        "Harbor API"
+    )
 
-    app_env: str = "development"
+    app_env: str = (
+        "development"
+    )
 
-    api_prefix: str = "/api/v1"
+    api_prefix: str = (
+        "/api/v1"
+    )
 
-    debug: bool = True
+    debug: bool = (
+        True
+    )
 
-    log_level: str = "INFO"
+    log_level: str = (
+        "INFO"
+    )
 
     cors_origins: str = (
         "http://localhost:5173,"
@@ -37,6 +55,7 @@ class Settings(BaseSettings):
     frontend_base_url: str = (
         "http://localhost:5173"
     )
+
 
     # ========================================================
     # Rate limiting
@@ -58,6 +77,7 @@ class Settings(BaseSettings):
         "10/minute"
     )
 
+
     # ========================================================
     # LLM usage
     # ========================================================
@@ -70,6 +90,7 @@ class Settings(BaseSettings):
         20
     )
 
+
     # ========================================================
     # Supabase
     # ========================================================
@@ -80,11 +101,13 @@ class Settings(BaseSettings):
 
     supabase_anon_key: str
 
+
     # ========================================================
-    # Harbor Staff
+    # Harbor staff
     # ========================================================
 
     staff_email: str
+
 
     # ========================================================
     # Authentication
@@ -92,11 +115,14 @@ class Settings(BaseSettings):
 
     jwt_secret_key: str
 
-    jwt_algorithm: str = "HS256"
+    jwt_algorithm: str = (
+        "HS256"
+    )
 
     jwt_access_token_expire_minutes: int = (
         60
     )
+
 
     # ========================================================
     # Embeddings
@@ -107,7 +133,10 @@ class Settings(BaseSettings):
         "all-MiniLM-L6-v2"
     )
 
-    embedding_dimension: int = 384
+    embedding_dimension: int = (
+        384
+    )
+
 
     # ========================================================
     # Groq
@@ -119,27 +148,39 @@ class Settings(BaseSettings):
         "llama-3.3-70b-versatile"
     )
 
+
     # ========================================================
     # Conversation memory
     # ========================================================
 
-    memory_buffer_size: int = 8
+    memory_buffer_size: int = (
+        8
+    )
 
-    memory_summary_threshold: int = 12
+    memory_summary_threshold: int = (
+        12
+    )
+
 
     # ========================================================
     # Monday.com
     # ========================================================
 
-    monday_api_token: str | None = None
+    monday_api_token: (
+        str | None
+    ) = None
 
     monday_api_url: str = (
         "https://api.monday.com/v2"
     )
 
-    monday_board_id: str | None = None
+    monday_board_id: (
+        str | None
+    ) = None
 
-    monday_group_id: str | None = None
+    monday_group_id: (
+        str | None
+    ) = None
 
     monday_harbor_ticket_id_column_id: (
         str | None
@@ -161,6 +202,7 @@ class Settings(BaseSettings):
         str | None
     ) = None
 
+
     # ========================================================
     # n8n
     # ========================================================
@@ -170,34 +212,58 @@ class Settings(BaseSettings):
     ) = None
 
     n8n_webhook_timeout_seconds: float = (
-        10.0
+        8.0
     )
 
+
     # ========================================================
-    # Configuration helpers
+    # Configuration
     # ========================================================
 
-    model_config = SettingsConfigDict(
-        env_file=ENV_FILE,
-        env_file_encoding="utf-8",
-        extra="ignore",
+    model_config = (
+        SettingsConfigDict(
+            env_file=(
+                ENV_FILE
+            ),
+
+            env_file_encoding=(
+                "utf-8"
+            ),
+
+            extra=(
+                "ignore"
+            ),
+        )
     )
+
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
 
     def get_cors_origins(
         self,
     ) -> list[str]:
         origins = [
             origin.strip()
+
             for origin
-            in self.cors_origins.split(",")
+            in self
+            .cors_origins
+            .split(",")
+
             if origin.strip()
         ]
 
+
         if not origins:
             raise ValueError(
-                "At least one CORS origin "
-                "must be configured."
+                (
+                    "At least one CORS "
+                    "origin must be configured."
+                )
             )
+
 
         return origins
 
