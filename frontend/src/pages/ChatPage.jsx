@@ -6,10 +6,14 @@ import {
   useState,
 } from "react";
 
-import apiClient from "../api/client";
+import {
+  streamAgentChat,
+} from "../api/agent";
 
 import {
+  getMyCaseUpdates,
   getMyCases,
+  replyToMyCase,
 } from "../api/tickets";
 
 import {
@@ -33,10 +37,6 @@ export default function ChatPage() {
     setActiveView,
   ] = useState("chat");
 
-
-  /* =======================================================
-     MY CASES TAB
-     ======================================================= */
 
   const [
     activeCaseTab,
@@ -73,12 +73,13 @@ export default function ChatPage() {
     setError,
   ] = useState("");
 
+
   const messagesEndRef =
     useRef(null);
 
 
   /* =======================================================
-     CASE STATE
+     MY CASES STATE
      ======================================================= */
 
   const [
@@ -108,17 +109,54 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     CHAT AUTO SCROLL
+     CASE CONVERSATION
+     ======================================================= */
+
+  const [
+    expandedCaseId,
+    setExpandedCaseId,
+  ] = useState(null);
+
+  const [
+    caseUpdates,
+    setCaseUpdates,
+  ] = useState([]);
+
+  const [
+    caseUpdatesLoading,
+    setCaseUpdatesLoading,
+  ] = useState(false);
+
+  const [
+    caseReply,
+    setCaseReply,
+  ] = useState("");
+
+  const [
+    caseReplySubmitting,
+    setCaseReplySubmitting,
+  ] = useState(false);
+
+  const [
+    caseConversationError,
+    setCaseConversationError,
+  ] = useState("");
+
+
+  /* =======================================================
+     AUTO SCROLL
      ======================================================= */
 
   useEffect(() => {
     if (
-      activeView === "chat"
+      activeView
+      === "chat"
     ) {
       messagesEndRef
         .current
         ?.scrollIntoView({
-          behavior: "smooth",
+          behavior:
+            "smooth",
         });
     }
   }, [
@@ -132,6 +170,23 @@ export default function ChatPage() {
      HELPERS
      ======================================================= */
 
+  const createLocalId = () => {
+    if (
+      typeof crypto
+      !== "undefined"
+      && crypto.randomUUID
+    ) {
+      return (
+        crypto.randomUUID()
+      );
+    }
+
+    return (
+      `${Date.now()}-${Math.random()}`
+    );
+  };
+
+
   const formatLabel = (
     value
   ) => {
@@ -139,7 +194,9 @@ export default function ChatPage() {
       return "Unknown";
     }
 
-    return String(value)
+    return String(
+      value
+    )
       .replaceAll(
         "_",
         " "
@@ -160,7 +217,9 @@ export default function ChatPage() {
     }
 
     const date =
-      new Date(value);
+      new Date(
+        value
+      );
 
     if (
       Number.isNaN(
@@ -170,15 +229,26 @@ export default function ChatPage() {
       return "Unknown";
     }
 
-    return date.toLocaleString(
-      undefined,
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }
+    return (
+      date.toLocaleString(
+        undefined,
+        {
+          month:
+            "short",
+
+          day:
+            "numeric",
+
+          year:
+            "numeric",
+
+          hour:
+            "numeric",
+
+          minute:
+            "2-digit",
+        }
+      )
     );
   };
 
@@ -188,23 +258,30 @@ export default function ChatPage() {
   ) => {
     const value =
       String(
-        severity || ""
+        severity
+        || ""
       ).toLowerCase();
 
     if (
       value === "critical"
       || value === "high"
     ) {
-      return "badge badge-danger";
+      return (
+        "badge badge-danger"
+      );
     }
 
     if (
       value === "medium"
     ) {
-      return "badge badge-warning";
+      return (
+        "badge badge-warning"
+      );
     }
 
-    return "badge badge-success";
+    return (
+      "badge badge-success"
+    );
   };
 
 
@@ -217,22 +294,28 @@ export default function ChatPage() {
       || status === "resolved"
       || status === "closed"
     ) {
-      return "badge badge-success";
+      return (
+        "badge badge-success"
+      );
     }
 
     if (
       status === "rejected"
       || status === "failed"
     ) {
-      return "badge badge-danger";
+      return (
+        "badge badge-danger"
+      );
     }
 
-    return "badge badge-warning";
+    return (
+      "badge badge-warning"
+    );
   };
 
 
   /* =======================================================
-     CUSTOMER CASE GROUPS
+     CASE GROUPS
      ======================================================= */
 
   const caseGroups =
@@ -248,24 +331,32 @@ export default function ChatPage() {
         approved:
           cases.filter(
             (ticket) =>
-              ticket.status === "approved"
-              || ticket.status === "executing"
+              ticket.status
+              === "approved"
+              || ticket.status
+              === "executing"
           ),
 
         successful:
           cases.filter(
             (ticket) =>
-              ticket.status === "open"
-              || ticket.status === "in_progress"
-              || ticket.status === "resolved"
-              || ticket.status === "closed"
+              ticket.status
+              === "open"
+              || ticket.status
+              === "in_progress"
+              || ticket.status
+              === "resolved"
+              || ticket.status
+              === "closed"
           ),
 
         rejected:
           cases.filter(
             (ticket) =>
-              ticket.status === "rejected"
-              || ticket.status === "failed"
+              ticket.status
+              === "rejected"
+              || ticket.status
+              === "failed"
           ),
       }),
       [cases]
@@ -334,15 +425,20 @@ export default function ChatPage() {
           );
         }
 
+
         try {
           const data =
             await getMyCases();
 
+
           setCases(
-            Array.isArray(data)
+            Array.isArray(
+              data
+            )
               ? data
               : []
           );
+
 
           setCasesLoaded(
             true
@@ -354,9 +450,13 @@ export default function ChatPage() {
             err
           );
 
+
           setCasesError(
             err.response?.data?.detail
-            || "Unable to load your support cases."
+            || (
+              "Unable to load "
+              + "your support cases."
+            )
           );
 
         } finally {
@@ -386,7 +486,176 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     SEND CHAT MESSAGE
+     CASE CONVERSATION
+     ======================================================= */
+
+  const loadCaseUpdates =
+    async (
+      ticketId
+    ) => {
+      setCaseUpdatesLoading(
+        true
+      );
+
+      setCaseConversationError(
+        ""
+      );
+
+
+      try {
+        const data =
+          await getMyCaseUpdates(
+            ticketId
+          );
+
+
+        setCaseUpdates(
+          Array.isArray(
+            data
+          )
+            ? data
+            : []
+        );
+
+      } catch (err) {
+        console.error(
+          "Unable to load case updates:",
+          err
+        );
+
+
+        setCaseConversationError(
+          err.response?.data?.detail
+          || (
+            "Unable to load "
+            + "case conversation."
+          )
+        );
+
+      } finally {
+        setCaseUpdatesLoading(
+          false
+        );
+      }
+    };
+
+
+  const toggleCaseConversation =
+    async (
+      ticketId
+    ) => {
+      if (
+        expandedCaseId
+        === ticketId
+      ) {
+        setExpandedCaseId(
+          null
+        );
+
+        setCaseUpdates([]);
+        setCaseReply("");
+        setCaseConversationError("");
+
+        return;
+      }
+
+
+      setExpandedCaseId(
+        ticketId
+      );
+
+      setCaseReply("");
+      setCaseConversationError("");
+
+
+      await loadCaseUpdates(
+        ticketId
+      );
+    };
+
+
+  /* =======================================================
+     IMMEDIATE CUSTOMER REPLY
+     ======================================================= */
+
+  const submitCaseReply =
+    async (
+      event,
+      ticketId
+    ) => {
+      event.preventDefault();
+
+
+      const content =
+        caseReply.trim();
+
+
+      if (
+        !content
+        || caseReplySubmitting
+      ) {
+        return;
+      }
+
+
+      setCaseReplySubmitting(
+        true
+      );
+
+      setCaseConversationError(
+        ""
+      );
+
+
+      try {
+        const newUpdate =
+          await replyToMyCase(
+            ticketId,
+            content
+          );
+
+
+        // --------------------------------------------------
+        // Append the server-created update immediately.
+        // No second GET is required before showing it.
+        // --------------------------------------------------
+
+        setCaseUpdates(
+          (current) => [
+            ...current,
+            newUpdate,
+          ]
+        );
+
+
+        setCaseReply("");
+
+
+      } catch (err) {
+        console.error(
+          "Unable to send customer reply:",
+          err
+        );
+
+
+        setCaseConversationError(
+          err.response?.data?.detail
+          || (
+            "Unable to send "
+            + "your reply."
+          )
+        );
+
+      } finally {
+        setCaseReplySubmitting(
+          false
+        );
+      }
+    };
+
+
+  /* =======================================================
+     STREAMING AI CHAT
      ======================================================= */
 
   const sendMessage =
@@ -395,8 +664,10 @@ export default function ChatPage() {
     ) => {
       event.preventDefault();
 
+
       const customerMessage =
         input.trim();
+
 
       if (
         !customerMessage
@@ -405,38 +676,163 @@ export default function ChatPage() {
         return;
       }
 
+
+      const assistantId =
+        createLocalId();
+
+
       setError("");
+
 
       setMessages(
         (current) => [
           ...current,
+
           {
-            role: "user",
+            id:
+              createLocalId(),
+
+            role:
+              "user",
+
             content:
               customerMessage,
+          },
+
+          {
+            id:
+              assistantId,
+
+            role:
+              "assistant",
+
+            content:
+              "",
+
+            streaming:
+              true,
+
+            citations:
+              [],
           },
         ]
       );
 
+
       setInput("");
-      setSending(true);
+      setSending(
+        true
+      );
+
 
       try {
-        const response =
-          await apiClient.post(
-            "/agent/chat",
-            {
-              message:
-                customerMessage,
-
-              conversation_id:
-                conversationId
-                || null,
-            }
-          );
 
         const data =
-          response.data;
+          await streamAgentChat({
+            message:
+              customerMessage,
+
+            conversationId:
+              conversationId
+              || null,
+
+
+            onToken:
+              (token) => {
+
+                setMessages(
+                  (current) =>
+                    current.map(
+                      (message) => {
+
+                        if (
+                          message.id
+                          !== assistantId
+                        ) {
+                          return message;
+                        }
+
+
+                        return {
+                          ...message,
+
+                          content:
+                            (
+                              message.content
+                              || ""
+                            )
+                            + token,
+                        };
+                      }
+                    )
+                );
+              },
+          });
+
+
+        // --------------------------------------------------
+        // Final AgentResponse is canonical.
+        //
+        // The backend has now completed:
+        // - output guardrail
+        // - citations
+        // - severity
+        // - escalation state
+        // - ticket confirmation / creation
+        // --------------------------------------------------
+
+        setMessages(
+          (current) =>
+            current.map(
+              (message) => {
+
+                if (
+                  message.id
+                  !== assistantId
+                ) {
+                  return message;
+                }
+
+
+                return {
+                  ...message,
+
+                  content:
+                    data.answer,
+
+                  streaming:
+                    false,
+
+                  action:
+                    data.action,
+
+                  severity:
+                    data.severity,
+
+                  citations:
+                    data.citations
+                    ?? [],
+
+                  escalationRequired:
+                    data.escalation_required
+                    ?? false,
+
+                  ticketId:
+                    data.ticket_id
+                    ?? null,
+
+                  ticketStatus:
+                    data.ticket_status
+                    ?? null,
+
+                  approvalStatus:
+                    data.approval_status
+                    ?? null,
+                };
+              }
+            )
+        );
+
 
         if (
           data.conversation_id
@@ -446,44 +842,6 @@ export default function ChatPage() {
           );
         }
 
-        setMessages(
-          (current) => [
-            ...current,
-            {
-              role:
-                "assistant",
-
-              content:
-                data.answer,
-
-              action:
-                data.action,
-
-              severity:
-                data.severity,
-
-              citations:
-                data.citations
-                ?? [],
-
-              escalationRequired:
-                data.escalation_required
-                ?? false,
-
-              ticketId:
-                data.ticket_id
-                ?? null,
-
-              ticketStatus:
-                data.ticket_status
-                ?? null,
-
-              approvalStatus:
-                data.approval_status
-                ?? null,
-            },
-          ]
-        );
 
         if (
           data.ticket_id
@@ -497,19 +855,37 @@ export default function ChatPage() {
           );
         }
 
+
       } catch (err) {
         console.error(
-          "Harbor request failed:",
+          "Harbor streaming request failed:",
           err
         );
 
-        setError(
-          err.response?.data?.detail
-          || "Harbor could not process your request."
+
+        setMessages(
+          (current) =>
+            current.filter(
+              (message) =>
+                message.id
+                !== assistantId
+            )
         );
 
+
+        setError(
+          err.message
+          || (
+            "Harbor could not "
+            + "process your request."
+          )
+        );
+
+
       } finally {
-        setSending(false);
+        setSending(
+          false
+        );
       }
     };
 
@@ -518,10 +894,12 @@ export default function ChatPage() {
     event
   ) => {
     if (
-      event.key === "Enter"
+      event.key
+      === "Enter"
       && !event.shiftKey
     ) {
       event.preventDefault();
+
 
       if (
         input.trim()
@@ -542,196 +920,385 @@ export default function ChatPage() {
 
   const renderCaseCard = (
     ticket
-  ) => (
-    <article
-      key={ticket.id}
-      className="customer-case-card"
-    >
+  ) => {
+    const conversationOpen =
+      expandedCaseId
+      === ticket.id;
 
-      <div className="customer-case-top">
 
-        <div className="customer-case-title">
+    return (
+      <article
+        key={
+          ticket.id
+        }
+        className="customer-case-card"
+      >
 
-          <div>
+        <div className="customer-case-top">
 
-            <span className="customer-case-number">
-              CASE{" "}
-              {String(
-                ticket.id
-              )
-                .slice(
-                  0,
-                  8
+          <div className="customer-case-title">
+
+            <div>
+
+              <span className="customer-case-number">
+                CASE{" "}
+                {String(
+                  ticket.id
                 )
-                .toUpperCase()}
-            </span>
+                  .slice(
+                    0,
+                    8
+                  )
+                  .toUpperCase()}
+              </span>
 
-            <h3>
-              {ticket.title
-                || "Support Case"}
-            </h3>
+
+              <h3>
+                {ticket.title
+                  || "Support Case"}
+              </h3>
+
+            </div>
+
+
+            <span
+              className={
+                getSeverityClass(
+                  ticket.severity
+                )
+              }
+            >
+              {formatLabel(
+                ticket.severity
+              )}
+            </span>
 
           </div>
 
 
           <span
             className={
-              getSeverityClass(
-                ticket.severity
+              getStatusClass(
+                ticket.status
               )
             }
           >
             {formatLabel(
-              ticket.severity
-            )}
-          </span>
-
-        </div>
-
-
-        <span
-          className={
-            getStatusClass(
-              ticket.status
-            )
-          }
-        >
-          {formatLabel(
-            ticket.status
-          )}
-        </span>
-
-      </div>
-
-
-      {ticket.description && (
-        <p className="customer-case-description">
-          {ticket.description}
-        </p>
-      )}
-
-
-      <div className="customer-case-details">
-
-        <div>
-
-          <span>
-            Approval
-          </span>
-
-          <strong>
-            {formatLabel(
-              ticket.approval_status
-            )}
-          </strong>
-
-        </div>
-
-
-        <div>
-
-          <span>
-            Status
-          </span>
-
-          <strong>
-            {formatLabel(
               ticket.status
             )}
-          </strong>
+          </span>
 
         </div>
 
 
-        <div>
-
-          <span>
-            Created
-          </span>
-
-          <strong>
-            {formatDate(
-              ticket.created_at
-            )}
-          </strong>
-
-        </div>
+        {ticket.description && (
+          <p className="customer-case-description">
+            {ticket.description}
+          </p>
+        )}
 
 
-        <div>
-
-          <span>
-            Last updated
-          </span>
-
-          <strong>
-            {formatDate(
-              ticket.updated_at
-            )}
-          </strong>
-
-        </div>
-
-      </div>
-
-
-      {ticket.monday_item_id && (
-        <div className="customer-case-sync">
-
-          <span className="customer-case-sync-icon">
-            ✓
-          </span>
+        <div className="customer-case-details">
 
           <div>
-
-            <strong>
-              Request synchronized
-            </strong>
-
             <span>
-              Your approved request has been
-              transferred to the support workflow.
+              Approval
             </span>
 
+            <strong>
+              {formatLabel(
+                ticket.approval_status
+              )}
+            </strong>
+          </div>
+
+
+          <div>
+            <span>
+              Status
+            </span>
+
+            <strong>
+              {formatLabel(
+                ticket.status
+              )}
+            </strong>
+          </div>
+
+
+          <div>
+            <span>
+              Created
+            </span>
+
+            <strong>
+              {formatDate(
+                ticket.created_at
+              )}
+            </strong>
+          </div>
+
+
+          <div>
+            <span>
+              Last updated
+            </span>
+
+            <strong>
+              {formatDate(
+                ticket.updated_at
+              )}
+            </strong>
           </div>
 
         </div>
-      )}
 
 
-      {ticket.failure_reason && (
-        <div className="alert alert-error customer-case-alert">
+        {ticket.monday_item_id && (
+          <div className="customer-case-sync">
+
+            <span className="customer-case-sync-icon">
+              ✓
+            </span>
+
+            <div>
+
+              <strong>
+                Request synchronized
+              </strong>
+
+              <span>
+                Your request has been transferred
+                to the support workflow.
+              </span>
+
+            </div>
+
+          </div>
+        )}
+
+
+        {ticket.failure_reason && (
+          <div className="alert alert-error customer-case-alert">
+
+            <div>
+
+              <strong>
+                Case processing issue
+              </strong>
+
+              <span>
+                {ticket.failure_reason}
+              </span>
+
+            </div>
+
+          </div>
+        )}
+
+
+        <div className="customer-case-footer">
 
           <div>
 
-            <strong>
-              Case processing issue
-            </strong>
-
             <span>
-              {ticket.failure_reason}
+              Ticket ID
             </span>
+
+            <code>
+              {ticket.id}
+            </code>
 
           </div>
 
+
+          <button
+            type="button"
+            className="ticket-conversation-button"
+            onClick={() =>
+              toggleCaseConversation(
+                ticket.id
+              )
+            }
+          >
+            {conversationOpen
+              ? "Hide conversation"
+              : "💬 View conversation"}
+          </button>
+
         </div>
-      )}
 
 
-      <div className="customer-case-footer">
+        {conversationOpen && (
+          <div className="ticket-conversation-panel customer-conversation-panel">
 
-        <span>
-          Ticket ID
-        </span>
+            <div className="ticket-conversation-header">
 
-        <code>
-          {ticket.id}
-        </code>
+              <div>
 
-      </div>
+                <h4>
+                  Case Conversation
+                </h4>
 
-    </article>
-  );
+                <p>
+                  Messages between you and Harbor support.
+                </p>
+
+              </div>
+
+
+              <button
+                type="button"
+                className="conversation-refresh-button"
+                onClick={() =>
+                  loadCaseUpdates(
+                    ticket.id
+                  )
+                }
+                aria-label="Refresh conversation"
+              >
+                ↻
+              </button>
+
+            </div>
+
+
+            {caseUpdatesLoading
+              ? (
+                <div className="conversation-loading">
+                  Loading conversation...
+                </div>
+              )
+              : caseUpdates.length === 0
+                ? (
+                  <div className="conversation-empty">
+                    No replies yet.
+                  </div>
+                )
+                : (
+                  <div className="ticket-update-list">
+
+                    {caseUpdates.map(
+                      (update) => {
+
+                        const fromCustomer =
+                          update.update_type
+                          === "customer_reply";
+
+
+                        return (
+                          <div
+                            key={
+                              update.id
+                            }
+                            className={
+                              fromCustomer
+                                ? (
+                                  "ticket-update "
+                                  + "ticket-update-customer"
+                                )
+                                : (
+                                  "ticket-update "
+                                  + "ticket-update-staff"
+                                )
+                            }
+                          >
+
+                            <div className="ticket-update-top">
+
+                              <strong>
+                                {fromCustomer
+                                  ? "You"
+                                  : "Harbor Support"}
+                              </strong>
+
+
+                              <span>
+                                {formatDate(
+                                  update.created_at
+                                )}
+                              </span>
+
+                            </div>
+
+
+                            <p>
+                              {update.content}
+                            </p>
+
+                          </div>
+                        );
+                      }
+                    )}
+
+                  </div>
+                )}
+
+
+            {caseConversationError && (
+              <div className="conversation-error">
+                {caseConversationError}
+              </div>
+            )}
+
+
+            <form
+              className="ticket-update-composer"
+              onSubmit={(event) =>
+                submitCaseReply(
+                  event,
+                  ticket.id
+                )
+              }
+            >
+
+              <textarea
+                rows="3"
+                value={
+                  caseReply
+                }
+                onChange={(event) =>
+                  setCaseReply(
+                    event.target.value
+                  )
+                }
+                placeholder="Write a reply to Harbor support..."
+                disabled={
+                  caseReplySubmitting
+                }
+              />
+
+
+              <div className="ticket-update-composer-footer">
+
+                <span>
+                  Your reply will be visible to Harbor support.
+                </span>
+
+
+                <button
+                  type="submit"
+                  className="reply-submit"
+                  disabled={
+                    caseReplySubmitting
+                    || !caseReply.trim()
+                  }
+                >
+                  {caseReplySubmitting
+                    ? "Sending..."
+                    : "Send reply"}
+                </button>
+
+              </div>
+
+            </form>
+
+          </div>
+        )}
+
+      </article>
+    );
+  };
 
 
   /* =======================================================
@@ -744,8 +1311,6 @@ export default function ChatPage() {
       <div className="background-orb app-orb-one" />
       <div className="background-orb app-orb-two" />
 
-
-      {/* TOPBAR */}
 
       <nav className="topbar">
 
@@ -816,7 +1381,9 @@ export default function ChatPage() {
             <button
               type="button"
               className="ghost-button"
-              onClick={logout}
+              onClick={
+                logout
+              }
             >
               Logout
             </button>
@@ -829,9 +1396,6 @@ export default function ChatPage() {
 
 
       <main className="chat-page">
-
-
-        {/* HERO */}
 
         <section className="chat-hero">
 
@@ -854,8 +1418,8 @@ export default function ChatPage() {
                   + "service, policies, or support documentation."
                 )
                 : (
-                  "Track your support requests "
-                  + "through each stage of the workflow."
+                  "Track your support requests and "
+                  + "communicate with Harbor support."
                 )}
             </p>
 
@@ -866,19 +1430,24 @@ export default function ChatPage() {
             <div className="chat-hero-meta">
 
               <div className="hero-meta-item">
+
                 <span className="meta-icon">
                   ✓
                 </span>
 
                 Grounded answers
+
               </div>
 
+
               <div className="hero-meta-item">
+
                 <span className="meta-icon">
                   ↗
                 </span>
 
                 Human escalation
+
               </div>
 
             </div>
@@ -887,17 +1456,16 @@ export default function ChatPage() {
         </section>
 
 
-        {/* =================================================
-            MAIN CUSTOMER TABS
-            ================================================= */}
-
         <div className="customer-view-tabs">
 
           <button
             type="button"
             className={
               activeView === "chat"
-                ? "customer-view-tab customer-view-tab-active"
+                ? (
+                  "customer-view-tab "
+                  + "customer-view-tab-active"
+                )
                 : "customer-view-tab"
             }
             onClick={() =>
@@ -914,7 +1482,10 @@ export default function ChatPage() {
             type="button"
             className={
               activeView === "cases"
-                ? "customer-view-tab customer-view-tab-active"
+                ? (
+                  "customer-view-tab "
+                  + "customer-view-tab-active"
+                )
                 : "customer-view-tab"
             }
             onClick={
@@ -934,7 +1505,7 @@ export default function ChatPage() {
 
 
         {/* =================================================
-            CHAT VIEW
+            AI CHAT
             ================================================= */}
 
         {activeView === "chat" && (
@@ -955,8 +1526,7 @@ export default function ChatPage() {
                   </h2>
 
                   <p>
-                    Secure, grounded support
-                    powered by your knowledge base.
+                    Secure, grounded support powered by your knowledge base.
                   </p>
 
                 </div>
@@ -985,10 +1555,9 @@ export default function ChatPage() {
                   </h3>
 
                   <p>
-                    Harbor can answer support
-                    questions, remember context,
-                    cite sources, and escalate
-                    to a human when needed.
+                    Harbor can answer support questions,
+                    remember context, cite sources, and
+                    escalate to a human when needed.
                   </p>
 
 
@@ -1008,6 +1577,7 @@ export default function ChatPage() {
                       </span>
 
                       <div>
+
                         <strong>
                           Refund policy
                         </strong>
@@ -1015,6 +1585,7 @@ export default function ChatPage() {
                         <small>
                           Ask about support policies
                         </small>
+
                       </div>
                     </button>
 
@@ -1033,6 +1604,7 @@ export default function ChatPage() {
                       </span>
 
                       <div>
+
                         <strong>
                           Account support
                         </strong>
@@ -1040,6 +1612,7 @@ export default function ChatPage() {
                         <small>
                           Get guided assistance
                         </small>
+
                       </div>
                     </button>
 
@@ -1058,6 +1631,7 @@ export default function ChatPage() {
                       </span>
 
                       <div>
+
                         <strong>
                           Human support
                         </strong>
@@ -1065,6 +1639,7 @@ export default function ChatPage() {
                         <small>
                           Request escalation
                         </small>
+
                       </div>
                     </button>
 
@@ -1075,12 +1650,11 @@ export default function ChatPage() {
 
 
               {messages.map(
-                (
-                  message,
-                  index
-                ) => (
+                (message) => (
                   <div
-                    key={index}
+                    key={
+                      message.id
+                    }
                     className={
                       message.role === "user"
                         ? "message-row message-row-user"
@@ -1117,20 +1691,35 @@ export default function ChatPage() {
                           === "assistant"
                           && (
                             <span>
-                              AI Assistant
+                              {message.streaming
+                                ? "Responding..."
+                                : "AI Assistant"}
                             </span>
                           )}
 
                       </div>
 
 
-                      <p className="message-content">
-                        {message.content}
-                      </p>
+                      {message.role === "assistant"
+                        && message.streaming
+                        && !message.content
+                        ? (
+                          <div className="typing-dots">
+                            <span />
+                            <span />
+                            <span />
+                          </div>
+                        )
+                        : (
+                          <p className="message-content">
+                            {message.content}
+                          </p>
+                        )}
 
 
                       {message.role
                         === "assistant"
+                        && !message.streaming
                         && (
                           <>
 
@@ -1178,9 +1767,8 @@ export default function ChatPage() {
                                     </strong>
 
                                     <p>
-                                      Harbor identified that
-                                      this request requires
-                                      support-agent review.
+                                      Harbor identified that this request
+                                      requires support-agent review.
                                     </p>
 
                                   </div>
@@ -1193,6 +1781,7 @@ export default function ChatPage() {
                                     <div className="ticket-detail-grid">
 
                                       <div>
+
                                         <span>
                                           Ticket ID
                                         </span>
@@ -1205,10 +1794,12 @@ export default function ChatPage() {
                                             12
                                           )}
                                         </strong>
+
                                       </div>
 
 
                                       <div>
+
                                         <span>
                                           Status
                                         </span>
@@ -1218,10 +1809,12 @@ export default function ChatPage() {
                                             message.ticketStatus
                                           )}
                                         </strong>
+
                                       </div>
 
 
                                       <div>
+
                                         <span>
                                           Approval
                                         </span>
@@ -1231,14 +1824,14 @@ export default function ChatPage() {
                                             message.approvalStatus
                                           )}
                                         </strong>
+
                                       </div>
 
                                     </div>
                                   )
                                   : (
                                     <div className="ticket-confirmation-note">
-                                      No support ticket has
-                                      been created yet.
+                                      No support ticket has been created yet.
                                     </div>
                                   )}
 
@@ -1268,6 +1861,7 @@ export default function ChatPage() {
                                             citationIndex
                                           }
                                         >
+
                                           <strong>
                                             {citation.source}
                                           </strong>
@@ -1277,12 +1871,10 @@ export default function ChatPage() {
                                             && (
                                               <span>
                                                 Chunk{" "}
-                                                {
-                                                  citation
-                                                    .chunk_index
-                                                }
+                                                {citation.chunk_index}
                                               </span>
                                             )}
+
                                         </div>
                                       )
                                     )}
@@ -1314,29 +1906,6 @@ export default function ChatPage() {
               )}
 
 
-              {sending && (
-                <div className="message-row message-row-assistant">
-
-                  <div className="message-avatar assistant-message-avatar">
-                    H
-                  </div>
-
-                  <div className="message-bubble assistant-bubble typing-bubble">
-
-                    <div className="typing-dots">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-
-                    Harbor is thinking
-
-                  </div>
-
-                </div>
-              )}
-
-
               <div
                 ref={
                   messagesEndRef
@@ -1350,6 +1919,7 @@ export default function ChatPage() {
               <div className="alert alert-error chat-error">
 
                 <div>
+
                   <strong>
                     Request failed
                   </strong>
@@ -1357,6 +1927,7 @@ export default function ChatPage() {
                   <span>
                     {error}
                   </span>
+
                 </div>
 
               </div>
@@ -1367,12 +1938,16 @@ export default function ChatPage() {
 
               <form
                 className="chat-composer"
-                onSubmit={sendMessage}
+                onSubmit={
+                  sendMessage
+                }
               >
 
                 <textarea
                   rows="1"
-                  value={input}
+                  value={
+                    input
+                  }
                   onChange={(event) =>
                     setInput(
                       event.target.value
@@ -1382,7 +1957,9 @@ export default function ChatPage() {
                     handleKeyDown
                   }
                   placeholder="Ask Harbor anything..."
-                  disabled={sending}
+                  disabled={
+                    sending
+                  }
                 />
 
 
@@ -1410,6 +1987,7 @@ export default function ChatPage() {
                   Press Enter to send ·
                   Shift + Enter for a new line
                 </span>
+
 
                 {conversationId && (
                   <span className="conversation-pill">
@@ -1441,8 +2019,7 @@ export default function ChatPage() {
                 </h2>
 
                 <p>
-                  Follow your cases from review
-                  through successful processing.
+                  Track cases and communicate with Harbor support.
                 </p>
 
               </div>
@@ -1472,6 +2049,7 @@ export default function ChatPage() {
               <div className="alert alert-error">
 
                 <div>
+
                   <strong>
                     Could not load cases
                   </strong>
@@ -1479,6 +2057,7 @@ export default function ChatPage() {
                   <span>
                     {casesError}
                   </span>
+
                 </div>
 
               </div>
@@ -1508,8 +2087,8 @@ export default function ChatPage() {
                     </h3>
 
                     <p>
-                      Confirmed human-support
-                      requests will appear here.
+                      Confirmed human-support requests
+                      will appear here.
                     </p>
 
                   </div>
@@ -1517,97 +2096,70 @@ export default function ChatPage() {
                 : (
                   <>
 
-                    {/* CASE WORKFLOW TABS */}
-
                     <div className="case-status-tabs">
 
-                      <button
-                        type="button"
-                        className={
-                          activeCaseTab === "pending"
-                            ? "case-status-tab case-status-tab-active"
-                            : "case-status-tab"
-                        }
-                        onClick={() =>
-                          setActiveCaseTab(
-                            "pending"
-                          )
-                        }
-                      >
-                        Pending
+                      {[
+                        [
+                          "pending",
+                          "Pending",
+                        ],
+                        [
+                          "approved",
+                          "Approved",
+                        ],
+                        [
+                          "successful",
+                          "Successful",
+                        ],
+                        [
+                          "rejected",
+                          "Rejected",
+                        ],
+                      ].map(
+                        ([
+                          key,
+                          label,
+                        ]) => (
+                          <button
+                            key={
+                              key
+                            }
+                            type="button"
+                            className={
+                              activeCaseTab === key
+                                ? (
+                                  "case-status-tab "
+                                  + "case-status-tab-active"
+                                )
+                                : "case-status-tab"
+                            }
+                            onClick={() => {
+                              setActiveCaseTab(
+                                key
+                              );
 
-                        <span className="case-status-count">
-                          {caseGroups.pending.length}
-                        </span>
-                      </button>
+                              setExpandedCaseId(
+                                null
+                              );
+                            }}
+                          >
 
+                            {label}
 
-                      <button
-                        type="button"
-                        className={
-                          activeCaseTab === "approved"
-                            ? "case-status-tab case-status-tab-active"
-                            : "case-status-tab"
-                        }
-                        onClick={() =>
-                          setActiveCaseTab(
-                            "approved"
-                          )
-                        }
-                      >
-                        Approved
+                            <span className="case-status-count">
+                              {
+                                caseGroups[
+                                  key
+                                ].length
+                              }
+                            </span>
 
-                        <span className="case-status-count">
-                          {caseGroups.approved.length}
-                        </span>
-                      </button>
-
-
-                      <button
-                        type="button"
-                        className={
-                          activeCaseTab === "successful"
-                            ? "case-status-tab case-status-tab-active"
-                            : "case-status-tab"
-                        }
-                        onClick={() =>
-                          setActiveCaseTab(
-                            "successful"
-                          )
-                        }
-                      >
-                        Successful
-
-                        <span className="case-status-count">
-                          {caseGroups.successful.length}
-                        </span>
-                      </button>
-
-
-                      <button
-                        type="button"
-                        className={
-                          activeCaseTab === "rejected"
-                            ? "case-status-tab case-status-tab-active"
-                            : "case-status-tab"
-                        }
-                        onClick={() =>
-                          setActiveCaseTab(
-                            "rejected"
-                          )
-                        }
-                      >
-                        Rejected
-
-                        <span className="case-status-count">
-                          {caseGroups.rejected.length}
-                        </span>
-                      </button>
+                          </button>
+                        )
+                      )}
 
                     </div>
 
-
-                    {/* ACTIVE CASE CATEGORY */}
 
                     <section className="customer-case-tab-panel">
 
@@ -1636,9 +2188,7 @@ export default function ChatPage() {
 
                         <span className="customer-case-panel-count">
                           {activeCaseGroup.length}
-
                           {" "}
-
                           {activeCaseGroup.length === 1
                             ? "case"
                             : "cases"}

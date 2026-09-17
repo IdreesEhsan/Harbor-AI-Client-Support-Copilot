@@ -13,11 +13,14 @@ from app.repositories.conversations import (
 from app.repositories.ticket_repository import (
     approve_ticket,
     create_ticket,
+    create_ticket_update,
     get_customer_profile,
     get_customer_profiles,
     get_ticket,
     get_ticket_for_review,
+    list_all_ticket_updates,
     list_all_tickets,
+    list_customer_visible_ticket_updates,
     list_tickets,
     reject_ticket,
 )
@@ -37,8 +40,8 @@ class TicketConversationNotFoundError(
     Exception
 ):
     """
-    Raised when the conversation does not exist or does
-    not belong to the authenticated customer.
+    Conversation does not exist or does not belong to the
+    authenticated customer.
     """
 
 
@@ -46,7 +49,7 @@ class UnsafeTicketContentError(
     Exception
 ):
     """
-    Raised when ticket content cannot safely be persisted.
+    Ticket content failed Harbor's safety checks.
     """
 
 
@@ -54,7 +57,7 @@ class TicketNotFoundError(
     Exception
 ):
     """
-    Raised when a requested support ticket does not exist.
+    Requested support ticket does not exist.
     """
 
 
@@ -62,8 +65,15 @@ class TicketAlreadyDecidedError(
     Exception
 ):
     """
-    Raised when a support agent attempts to decide an
-    already-decided ticket.
+    Ticket approval decision has already been made.
+    """
+
+
+class InvalidTicketUpdateTypeError(
+    Exception
+):
+    """
+    Unsupported ticket update type.
     """
 
 
@@ -75,8 +85,8 @@ def prepare_ticket_content(
     content: str,
 ) -> str:
     """
-    Run ticket content through Harbor input guardrails
-    before storing it.
+    Run persisted support content through Harbor's input
+    guardrails before storing it.
     """
 
     if not isinstance(
@@ -87,9 +97,7 @@ def prepare_ticket_content(
             "Ticket content must be a string."
         )
 
-    content = (
-        content.strip()
-    )
+    content = content.strip()
 
     if not content:
         raise ValueError(
@@ -114,8 +122,8 @@ def prepare_ticket_content(
         if not safe_content:
             raise (
                 UnsafeTicketContentError(
-                    "Ticket content could not be "
-                    "sanitized safely."
+                    "Ticket content could not "
+                    "be sanitized safely."
                 )
             )
 
@@ -130,8 +138,8 @@ def prepare_ticket_content(
         if not safe_content:
             raise (
                 UnsafeTicketContentError(
-                    "Ticket content could not be "
-                    "sanitized safely."
+                    "Ticket content could not "
+                    "be sanitized safely."
                 )
             )
 
@@ -162,8 +170,7 @@ def build_ticket_idempotency_key(
     description: str,
 ) -> str:
     """
-    Build deterministic ticket identity without exposing
-    raw customer content inside the key.
+    Build deterministic internal ticket identity.
     """
 
     normalized = "|".join(
@@ -189,7 +196,7 @@ def build_ticket_idempotency_key(
 
 
 # ============================================================
-# CREATE TICKET
+# CREATE SUPPORT TICKET
 # ============================================================
 
 def prepare_support_ticket(
@@ -201,7 +208,7 @@ def prepare_support_ticket(
     severity: TicketSeverity = "medium",
 ) -> dict[str, Any]:
     """
-    Validate and persist a confirmed customer escalation.
+    Validate and persist a customer-confirmed escalation.
 
     This does not approve or execute any external action.
     """
@@ -303,9 +310,7 @@ def list_user_tickets(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Return customer-owned tickets.
-
-    This will power My Cases.
+    Return authenticated customer's support tickets.
     """
 
     return list_tickets(
@@ -322,7 +327,7 @@ def enrich_ticket_with_customer(
     ticket: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Add support-relevant customer profile data to one
+    Attach safe customer profile information to a
     staff-facing ticket.
     """
 
@@ -356,8 +361,8 @@ def enrich_tickets_with_customers(
     tickets: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
-    Enrich multiple staff tickets using one batched user
-    lookup rather than one database request per ticket.
+    Enrich staff ticket list using one batched profile
+    lookup.
     """
 
     if not tickets:
@@ -412,8 +417,7 @@ def list_staff_tickets(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """
-    Return all customer support tickets for authorized
-    staff, enriched with customer profile information.
+    Return all tickets for authorized Harbor staff.
     """
 
     tickets = (
@@ -434,8 +438,7 @@ def review_ticket(
     ticket_id: str,
 ) -> dict[str, Any]:
     """
-    Load one ticket for an authorized staff member and
-    attach the customer's profile information.
+    Load one ticket for authorized support staff.
     """
 
     ticket = (
@@ -467,9 +470,10 @@ def decide_ticket_approval(
     approved: bool,
 ) -> TicketApprovalResult:
     """
-    Record an authorized staff approval or rejection.
+    Persist an authorized staff approval or rejection.
 
-    No external business action occurs in this function.
+    This operation does not execute external business
+    actions.
     """
 
     ticket = (
@@ -557,4 +561,283 @@ def decide_ticket_approval(
                 "approved_at"
             )
         ),
+    )
+
+
+# ============================================================
+# TICKET UPDATE AUTHOR ENRICHMENT
+# ============================================================
+
+def enrich_ticket_updates(
+    updates: list[
+        dict[str, Any]
+    ],
+) -> list[
+    dict[str, Any]
+]:
+    """
+    Attach safe profile data to ticket update authors.
+    """
+
+    if not updates:
+        return []
+
+    author_ids = [
+        str(
+            update["author_id"]
+        )
+        for update
+        in updates
+        if update.get(
+            "author_id"
+        )
+    ]
+
+    profiles = (
+        get_customer_profiles(
+            author_ids
+        )
+    )
+
+    enriched = []
+
+    for update in updates:
+        record = dict(
+            update
+        )
+
+        author_id = str(
+            update.get(
+                "author_id",
+                "",
+            )
+        )
+
+        profile = profiles.get(
+            author_id
+        )
+
+        if profile:
+            record[
+                "author"
+            ] = {
+                "id":
+                    profile["id"],
+
+                "full_name":
+                    profile.get(
+                        "full_name"
+                    ),
+
+                "email":
+                    profile.get(
+                        "email"
+                    ),
+
+                "role":
+                    update.get(
+                        "author_role"
+                    ),
+            }
+
+        else:
+            record[
+                "author"
+            ] = {
+                "id":
+                    author_id,
+
+                "full_name":
+                    None,
+
+                "email":
+                    None,
+
+                "role":
+                    update.get(
+                        "author_role"
+                    ),
+            }
+
+        enriched.append(
+            record
+        )
+
+    return enriched
+
+
+# ============================================================
+# CUSTOMER REPLIES
+# ============================================================
+
+def create_customer_ticket_reply(
+    *,
+    ticket_id: str,
+    user_id: str,
+    content: str,
+) -> dict[str, Any]:
+    """
+    Create a customer reply on a customer-owned ticket.
+    """
+
+    ticket = get_user_ticket(
+        ticket_id=ticket_id,
+        user_id=user_id,
+    )
+
+    if ticket is None:
+        raise TicketNotFoundError(
+            "Support ticket was not found."
+        )
+
+    safe_content = (
+        prepare_ticket_content(
+            content
+        )
+    )
+
+    update = (
+        create_ticket_update(
+            ticket_id=ticket_id,
+
+            author_id=user_id,
+
+            author_role="customer",
+
+            update_type=(
+                "customer_reply"
+            ),
+
+            content=safe_content,
+        )
+    )
+
+    return (
+        enrich_ticket_updates(
+            [update]
+        )[0]
+    )
+
+
+def list_customer_ticket_updates(
+    *,
+    ticket_id: str,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    """
+    Return customer-visible timeline entries for one
+    customer-owned ticket.
+
+    Internal notes never leave this method.
+    """
+
+    ticket = get_user_ticket(
+        ticket_id=ticket_id,
+        user_id=user_id,
+    )
+
+    if ticket is None:
+        raise TicketNotFoundError(
+            "Support ticket was not found."
+        )
+
+    updates = (
+        list_customer_visible_ticket_updates(
+            ticket_id
+        )
+    )
+
+    return (
+        enrich_ticket_updates(
+            updates
+        )
+    )
+
+
+# ============================================================
+# STAFF REPLIES / INTERNAL NOTES
+# ============================================================
+
+def create_staff_ticket_update(
+    *,
+    ticket_id: str,
+    staff_id: str,
+    staff_role: str,
+    update_type: str,
+    content: str,
+) -> dict[str, Any]:
+    """
+    Create either:
+
+    - customer-visible staff reply;
+    - staff-only internal note.
+    """
+
+    if update_type not in {
+        "staff_reply",
+        "internal_note",
+    }:
+        raise (
+            InvalidTicketUpdateTypeError(
+                "Unsupported staff update type."
+            )
+        )
+
+    review_ticket(
+        ticket_id=ticket_id
+    )
+
+    safe_content = (
+        prepare_ticket_content(
+            content
+        )
+    )
+
+    update = (
+        create_ticket_update(
+            ticket_id=ticket_id,
+
+            author_id=staff_id,
+
+            author_role=staff_role,
+
+            update_type=(
+                update_type
+            ),
+
+            content=safe_content,
+        )
+    )
+
+    return (
+        enrich_ticket_updates(
+            [update]
+        )[0]
+    )
+
+
+def list_staff_ticket_updates(
+    *,
+    ticket_id: str,
+) -> list[dict[str, Any]]:
+    """
+    Return complete support timeline for authorized staff.
+
+    Includes internal notes.
+    """
+
+    review_ticket(
+        ticket_id=ticket_id
+    )
+
+    updates = (
+        list_all_ticket_updates(
+            ticket_id
+        )
+    )
+
+    return (
+        enrich_ticket_updates(
+            updates
+        )
     )

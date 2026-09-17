@@ -8,6 +8,7 @@ from uuid import uuid4
 from app.db.supabase import (
     get_supabase_client,
 )
+
 from app.tickets.schemas import (
     TicketCreate,
 )
@@ -21,10 +22,7 @@ def get_customer_profile(
     user_id: str,
 ) -> dict[str, Any] | None:
     """
-    Return the support-relevant profile fields for one
-    Harbor customer.
-
-    Password-related fields are deliberately not selected.
+    Return support-relevant profile fields for one user.
     """
 
     if not isinstance(
@@ -74,16 +72,9 @@ def get_customer_profiles(
     user_ids: list[str],
 ) -> dict[str, dict[str, Any]]:
     """
-    Fetch customer profiles in one query.
+    Fetch multiple user profiles in one database query.
 
-    Returns:
-        {
-            "<user-id>": {
-                ...
-            }
-        }
-
-    This avoids issuing one database request per ticket.
+    Returns a mapping keyed by user UUID.
     """
 
     cleaned_ids = list(
@@ -142,7 +133,7 @@ def get_ticket_by_idempotency_key(
     user_id: str,
 ) -> dict[str, Any] | None:
     """
-    Find an existing ticket using the customer and
+    Find an existing ticket using customer identity and
     deterministic idempotency key.
     """
 
@@ -180,7 +171,7 @@ def get_ticket_by_idempotency_key(
 
 
 # ============================================================
-# CREATE
+# CREATE SUPPORT TICKET
 # ============================================================
 
 def create_ticket(
@@ -189,8 +180,7 @@ def create_ticket(
     """
     Persist Harbor's internal support ticket.
 
-    New tickets begin in pending approval and do not
-    trigger an external business action.
+    New tickets begin in pending approval.
     """
 
     user_id = str(
@@ -265,8 +255,7 @@ def get_ticket(
     """
     Return one customer-owned ticket.
 
-    Both identifiers are part of the query to enforce
-    ownership.
+    Ownership is enforced using ticket ID and user ID.
     """
 
     client = get_supabase_client()
@@ -298,10 +287,7 @@ def list_tickets(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Return tickets belonging to one authenticated
-    customer.
-
-    This will later be used by My Cases.
+    Return tickets belonging to one authenticated customer.
     """
 
     if limit <= 0:
@@ -341,10 +327,9 @@ def list_all_tickets(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """
-    Return support tickets across all customers.
+    Return tickets across all customers.
 
-    This method is intentionally unscoped and must only
-    be called behind staff RBAC.
+    This method must remain behind staff RBAC.
     """
 
     if limit <= 0:
@@ -376,10 +361,10 @@ def get_ticket_for_review(
     ticket_id: str,
 ) -> dict[str, Any] | None:
     """
-    Return one ticket for an authorized Harbor support
-    agent.
+    Return one ticket for an authorized human reviewer.
 
-    This query is intentionally not ownership scoped.
+    This query intentionally does not scope to the ticket
+    owner's user ID.
     """
 
     client = get_supabase_client()
@@ -411,7 +396,7 @@ def approve_ticket(
     approved_by: str,
 ) -> dict[str, Any] | None:
     """
-    Approve an internal pending Harbor ticket.
+    Approve a pending support ticket.
     """
 
     approved_at = (
@@ -469,7 +454,7 @@ def reject_ticket(
     rejected_by: str,
 ) -> dict[str, Any] | None:
     """
-    Reject a pending Harbor support ticket.
+    Reject a pending support ticket.
     """
 
     decided_at = (
@@ -542,9 +527,7 @@ def claim_ticket_for_execution(
             "ticket_id must be a string."
         )
 
-    ticket_id = (
-        ticket_id.strip()
-    )
+    ticket_id = ticket_id.strip()
 
     if not ticket_id:
         raise ValueError(
@@ -837,3 +820,126 @@ def mark_ticket_executed(
         return None
 
     return response.data[0]
+
+
+# ============================================================
+# TICKET UPDATES
+# ============================================================
+
+def create_ticket_update(
+    *,
+    ticket_id: str,
+    author_id: str,
+    author_role: str,
+    update_type: str,
+    content: str,
+) -> dict[str, Any]:
+    """
+    Persist one ticket conversation entry.
+
+    Authorization is performed in the service/API layer.
+    """
+
+    client = get_supabase_client()
+
+    response = (
+        client
+        .table("ticket_updates")
+        .insert(
+            {
+                "ticket_id":
+                    ticket_id,
+
+                "author_id":
+                    author_id,
+
+                "author_role":
+                    author_role,
+
+                "update_type":
+                    update_type,
+
+                "content":
+                    content,
+            }
+        )
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError(
+            "Failed to create ticket update."
+        )
+
+    return response.data[0]
+
+
+def list_customer_visible_ticket_updates(
+    ticket_id: str,
+) -> list[dict[str, Any]]:
+    """
+    Return only conversation entries customers may see.
+
+    Internal notes are excluded at query level.
+    """
+
+    client = get_supabase_client()
+
+    response = (
+        client
+        .table("ticket_updates")
+        .select("*")
+        .eq(
+            "ticket_id",
+            ticket_id,
+        )
+        .in_(
+            "update_type",
+            [
+                "customer_reply",
+                "staff_reply",
+            ],
+        )
+        .order(
+            "created_at",
+            desc=False,
+        )
+        .execute()
+    )
+
+    return (
+        response.data
+        or []
+    )
+
+
+def list_all_ticket_updates(
+    ticket_id: str,
+) -> list[dict[str, Any]]:
+    """
+    Return the complete staff ticket timeline.
+
+    Includes internal notes.
+    """
+
+    client = get_supabase_client()
+
+    response = (
+        client
+        .table("ticket_updates")
+        .select("*")
+        .eq(
+            "ticket_id",
+            ticket_id,
+        )
+        .order(
+            "created_at",
+            desc=False,
+        )
+        .execute()
+    )
+
+    return (
+        response.data
+        or []
+    )

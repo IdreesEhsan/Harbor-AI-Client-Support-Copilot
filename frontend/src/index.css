@@ -5146,3 +5146,870 @@ p {
       flex-end;
   }
 }
+
+/* =========================================================
+   TICKET CONVERSATION BUTTON
+   ========================================================= */
+
+.ticket-footer-left {
+  display: flex;
+  align-items: center;
+}
+
+
+.ticket-conversation-button {
+  min-height: 33px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 5px;
+
+  padding:
+    0 11px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 9px;
+
+  background:
+    #ffffff;
+
+  color:
+    var(--primary);
+
+  font-size: 9px;
+  font-weight: 750;
+
+  cursor: pointer;
+
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+
+.ticket-conversation-button:hover {
+  background:
+    var(--primary-soft);
+
+  border-color:
+    rgba(
+      79,
+      70,
+      229,
+      0.18
+    );
+}
+
+
+/* =========================================================
+   TICKET ID
+   ========================================================= */
+
+.ticket-id-full {
+  display: flex;
+  align-items: center;
+
+  gap: 7px;
+
+  margin-top: 9px;
+
+  padding-top: 8px;
+
+  border-top:
+    1px solid
+    var(--border);
+}
+
+
+.ticket-id-full span {
+  color:
+    var(--text-light);
+
+  font-size: 7px;
+  font-weight: 800;
+
+  text-transform: uppercase;
+}
+
+
+.ticket-id-full code {
+  overflow: hidden;
+
+  color:
+    var(--text-muted);
+
+  font-size: 8px;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+/* =========================================================
+   CONVERSATION PANEL
+   ========================================================= */
+
+.ticket-conversation-panel {
+  margin-top: 12px;
+
+  padding: 13px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 13px;
+
+  background:
+    rgba(
+      248,
+      250,
+      252,
+      0.76
+    );
+}
+
+
+.ticket-conversation-header {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 14px;
+
+  padding-bottom: 10px;
+
+  margin-bottom: 10px;
+
+  border-bottom:
+    1px solid
+    var(--border);
+}
+
+
+.ticket-conversation-header h4 {
+  margin:
+    0 0 2px;
+
+  color:
+    var(--text-strong);
+
+  font-size: 11px;
+}
+
+
+.ticket-conversation-header p {
+  margin: 0;
+
+  color:
+    var(--text-muted);
+
+  font-size: 8px;
+
+  line-height: 1.45;
+}
+
+
+.conversation-refresh-button {
+  width: 30px;
+  height: 30px;
+
+  flex: 0 0 auto;
+
+  display: grid;
+  place-items: center;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 8px;
+
+  background:
+    #ffffff;
+
+  color:
+    var(--text-muted);
+
+  font-size: 11px;
+
+  cursor: pointer;
+
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+
+.conversation-refresh-button:hover {
+  color:
+    var(--primary);
+
+  background:
+    var(--primary-soft);
+}
+
+
+/* =========================================================
+   CONVERSATION LIST
+   ========================================================= */
+
+.ticket-update-list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 8px;
+
+  max-height: 300px;
+
+  overflow-y: auto;
+
+  padding:
+    2px 4px 2px 0;
+}
+
+
+.ticket-update {
+  padding:
+    9px 10px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 10px;
+
+  background:
+    #ffffff;
+}
+
+
+.ticket-update-customer {
+  margin-left:
+    36px;
+
+  border-color:
+    rgba(
+      79,
+      70,
+      229,
+      0.13
+    );
+
+  background:
+    rgba(
+      79,
+      70,
+      229,
+      0.055
+    );
+}
+
+
+.ticket-update-staff {
+  margin-right:
+    36px;
+
+  border-color:
+    rgba(
+      14,
+      165,
+      233,
+      0.12
+    );
+
+  background:
+    rgba(
+      240,
+      249,
+      255,
+      0.72
+    );
+}
+
+
+.ticket-update-internal {
+  margin:
+    0 18px;
+
+  border-color:
+    rgba(
+      217,
+      119,
+      6,
+      0.2
+    );
+
+  background:
+    rgba(
+      254,
+      243,
+      199,
+      0.55
+    );
+}
+
+
+.ticket-update-top {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 10px;
+
+  margin-bottom: 4px;
+}
+
+
+.ticket-update-top strong {
+  color:
+    var(--text-strong);
+
+  font-size: 8px;
+  font-weight: 800;
+}
+
+
+.ticket-update-top span {
+  color:
+    var(--text-light);
+
+  font-size: 7px;
+}
+
+
+.ticket-update p {
+  margin: 0;
+
+  color:
+    var(--text-muted);
+
+  font-size: 9px;
+
+  line-height: 1.55;
+
+  white-space: pre-wrap;
+
+  overflow-wrap: anywhere;
+}
+
+
+/* =========================================================
+   INTERNAL NOTE
+   ========================================================= */
+
+.internal-note-label {
+  display: inline-block;
+
+  margin-top: 6px;
+
+  padding:
+    3px 6px;
+
+  border-radius:
+    999px;
+
+  background:
+    #fef3c7;
+
+  color:
+    #92400e;
+
+  font-size: 7px;
+  font-weight: 800;
+
+  text-transform:
+    uppercase;
+
+  letter-spacing:
+    0.04em;
+}
+
+
+/* =========================================================
+   CONVERSATION STATE
+   ========================================================= */
+
+.conversation-loading,
+.conversation-empty {
+  padding:
+    20px 12px;
+
+  text-align:
+    center;
+
+  color:
+    var(--text-light);
+
+  font-size: 9px;
+}
+
+
+.conversation-error {
+  margin-top: 8px;
+
+  padding:
+    8px 10px;
+
+  border:
+    1px solid
+    rgba(
+      220,
+      38,
+      38,
+      0.12
+    );
+
+  border-radius: 8px;
+
+  color:
+    #991b1b;
+
+  background:
+    rgba(
+      254,
+      226,
+      226,
+      0.75
+    );
+
+  font-size: 8px;
+}
+
+
+/* =========================================================
+   STAFF UPDATE MODE
+   ========================================================= */
+
+.ticket-update-mode-tabs {
+  display: inline-flex;
+
+  gap: 3px;
+
+  margin-top: 11px;
+
+  padding: 3px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 9px;
+
+  background:
+    #f1f5f9;
+}
+
+
+.update-mode-button {
+  min-height: 29px;
+
+  padding:
+    0 10px;
+
+  border: none;
+
+  border-radius: 7px;
+
+  background:
+    transparent;
+
+  color:
+    var(--text-muted);
+
+  font-size: 8px;
+  font-weight: 750;
+
+  cursor: pointer;
+
+  transition:
+    background var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
+}
+
+
+.update-mode-button:hover {
+  color:
+    var(--text-strong);
+}
+
+
+.update-mode-button-active {
+  background:
+    #ffffff;
+
+  color:
+    var(--primary);
+
+  box-shadow:
+    0 2px 6px
+    rgba(
+      15,
+      23,
+      42,
+      0.05
+    );
+}
+
+
+/* =========================================================
+   UPDATE COMPOSER
+   ========================================================= */
+
+.ticket-update-composer {
+  margin-top: 9px;
+}
+
+
+.ticket-update-composer textarea {
+  width: 100%;
+
+  min-height: 74px;
+
+  resize: vertical;
+
+  padding:
+    10px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 10px;
+
+  outline: none;
+
+  background:
+    #ffffff;
+
+  color:
+    var(--text-strong);
+
+  font: inherit;
+
+  font-size: 9px;
+
+  line-height: 1.5;
+
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+
+
+.ticket-update-composer textarea::placeholder {
+  color:
+    var(--text-light);
+}
+
+
+.ticket-update-composer textarea:focus {
+  border-color:
+    rgba(
+      79,
+      70,
+      229,
+      0.35
+    );
+
+  box-shadow:
+    0 0 0 3px
+    rgba(
+      79,
+      70,
+      229,
+      0.06
+    );
+}
+
+
+.ticket-update-composer-footer {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-top: 7px;
+}
+
+
+.ticket-update-composer-footer > span {
+  color:
+    var(--text-light);
+
+  font-size: 7px;
+
+  line-height: 1.4;
+}
+
+
+/* =========================================================
+   REPLY / NOTE BUTTONS
+   ========================================================= */
+
+.reply-submit,
+.internal-note-submit {
+  min-height: 32px;
+
+  flex: 0 0 auto;
+
+  padding:
+    0 13px;
+
+  border: none;
+
+  border-radius: 8px;
+
+  font-size: 8px;
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    opacity var(--transition),
+    transform var(--transition);
+}
+
+
+.reply-submit {
+  background:
+    var(--primary);
+
+  color:
+    #ffffff;
+}
+
+
+.internal-note-submit {
+  background:
+    #fef3c7;
+
+  color:
+    #92400e;
+}
+
+
+.reply-submit:hover:not(:disabled),
+.internal-note-submit:hover:not(:disabled) {
+  transform:
+    translateY(-1px);
+}
+
+
+.reply-submit:disabled,
+.internal-note-submit:disabled {
+  opacity: 0.5;
+
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   CUSTOMER CONVERSATION
+   ========================================================= */
+
+.customer-conversation-panel {
+  margin-top: 11px;
+}
+
+
+.customer-case-footer {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-top: 11px;
+
+  padding-top: 10px;
+
+  border-top:
+    1px solid
+    var(--border);
+}
+
+
+.customer-case-footer > div {
+  min-width: 0;
+}
+
+
+.customer-case-footer span {
+  display: block;
+
+  margin-bottom: 2px;
+
+  color:
+    var(--text-light);
+
+  font-size: 7px;
+  font-weight: 800;
+
+  text-transform: uppercase;
+}
+
+
+.customer-case-footer code {
+  display: block;
+
+  overflow: hidden;
+
+  max-width: 340px;
+
+  color:
+    var(--text-muted);
+
+  font-size: 8px;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+/* =========================================================
+   CUSTOMER SYNC STATUS
+   ========================================================= */
+
+.customer-case-sync {
+  display: flex;
+  align-items: center;
+
+  gap: 9px;
+
+  margin-top: 10px;
+
+  padding:
+    9px 10px;
+
+  border:
+    1px solid
+    rgba(
+      22,
+      163,
+      74,
+      0.1
+    );
+
+  border-radius: 10px;
+
+  background:
+    rgba(
+      220,
+      252,
+      231,
+      0.65
+    );
+
+  color:
+    #166534;
+}
+
+
+.customer-case-sync-icon {
+  width: 28px;
+  height: 28px;
+
+  flex: 0 0 auto;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 8px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.78
+    );
+
+  font-size: 10px;
+  font-weight: 900;
+}
+
+
+.customer-case-sync strong,
+.customer-case-sync span {
+  display: block;
+}
+
+
+.customer-case-sync strong {
+  margin-bottom: 2px;
+
+  font-size: 9px;
+}
+
+
+.customer-case-sync span {
+  font-size: 8px;
+
+  opacity: 0.8;
+}
+
+
+/* =========================================================
+   RESPONSIVE CONVERSATION UI
+   ========================================================= */
+
+@media (
+  max-width: 720px
+) {
+
+  .ticket-update-customer,
+  .ticket-update-staff,
+  .ticket-update-internal {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+
+  .ticket-update-composer-footer {
+    align-items:
+      stretch;
+
+    flex-direction:
+      column;
+  }
+
+
+  .reply-submit,
+  .internal-note-submit {
+    width: 100%;
+  }
+
+
+  .customer-case-footer {
+    align-items:
+      flex-start;
+
+    flex-direction:
+      column;
+  }
+
+
+  .customer-case-footer code {
+    max-width: 100%;
+  }
+
+
+  .customer-case-footer
+  .ticket-conversation-button {
+    width: 100%;
+  }
+
+}
