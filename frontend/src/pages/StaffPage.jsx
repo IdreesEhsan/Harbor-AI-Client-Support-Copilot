@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -18,6 +19,12 @@ import {
   useAuth,
 } from "../context/AuthContext";
 
+import {
+  connectNotificationSocket,
+} from "../realtime/notifications";
+
+import "../styles/notifications.css";
+
 
 export default function StaffPage() {
   const {
@@ -25,10 +32,6 @@ export default function StaffPage() {
     logout,
   } = useAuth();
 
-
-  /* =======================================================
-     TICKET STATE
-     ======================================================= */
 
   const [
     tickets,
@@ -76,10 +79,6 @@ export default function StaffPage() {
   ] = useState(null);
 
 
-  /* =======================================================
-     CONVERSATION STATE
-     ======================================================= */
-
   const [
     expandedTicketId,
     setExpandedTicketId,
@@ -116,9 +115,71 @@ export default function StaffPage() {
   ] = useState("");
 
 
-  /* =======================================================
-     LOAD TICKETS
-     ======================================================= */
+  const [
+    messageNotifications,
+    setMessageNotifications,
+  ] = useState([]);
+
+  const [
+    notificationMenuOpen,
+    setNotificationMenuOpen,
+  ] = useState(false);
+
+  const [
+    unreadByTicket,
+    setUnreadByTicket,
+  ] = useState({});
+
+
+  const expandedTicketIdRef =
+    useRef(null);
+
+  const notificationMenuRef =
+    useRef(null);
+
+
+  useEffect(() => {
+    expandedTicketIdRef.current =
+      expandedTicketId;
+  }, [
+    expandedTicketId,
+  ]);
+
+
+  useEffect(() => {
+    const handleOutsideClick =
+      (
+        event
+      ) => {
+        if (
+          notificationMenuRef.current
+          && !notificationMenuRef
+            .current
+            .contains(
+              event.target
+            )
+        ) {
+          setNotificationMenuOpen(
+            false
+          );
+        }
+      };
+
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick
+    );
+
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick
+      );
+    };
+  }, []);
+
 
   const loadTickets =
     useCallback(
@@ -126,6 +187,7 @@ export default function StaffPage() {
         showRefreshState = false
       ) => {
         setError("");
+
 
         if (showRefreshState) {
           setRefreshing(
@@ -148,14 +210,10 @@ export default function StaffPage() {
           );
 
         } catch (err) {
-          console.error(
-            "Unable to load Harbor tickets:",
-            err
-          );
-
-
           setError(
-            err.response?.data?.detail
+            err.response
+              ?.data
+              ?.detail
             || "Unable to load support tickets."
           );
 
@@ -180,9 +238,148 @@ export default function StaffPage() {
   ]);
 
 
-  /* =======================================================
-     APPROVE / REJECT
-     ======================================================= */
+  /*
+   * REALTIME STAFF NOTIFICATIONS.
+   *
+   * No polling.
+   * No notification HTTP endpoint.
+   */
+
+  useEffect(() => {
+    if (
+      !user
+      || ![
+        "support_agent",
+        "admin",
+      ].includes(
+        user.role
+      )
+    ) {
+      return undefined;
+    }
+
+
+    const disconnect =
+      connectNotificationSocket({
+        onMessage:
+          (
+            notification
+          ) => {
+            if (
+              notification?.type
+              !== "ticket_message"
+              || notification?.recipient
+              !== "staff"
+              || notification?.update_type
+              !== "customer_reply"
+            ) {
+              return;
+            }
+
+
+            const ticketId =
+              notification.ticket_id;
+
+
+            if (!ticketId) {
+              return;
+            }
+
+
+            setMessageNotifications(
+              (current) => {
+                if (
+                  current.some(
+                    (item) =>
+                      item.id
+                      === notification.id
+                  )
+                ) {
+                  return current;
+                }
+
+
+                return [
+                  notification,
+                  ...current,
+                ].slice(
+                  0,
+                  30
+                );
+              }
+            );
+
+
+            if (
+              expandedTicketIdRef.current
+              === ticketId
+            ) {
+              setTicketUpdates(
+                (current) => {
+                  if (
+                    current.some(
+                      (update) =>
+                        update.id
+                        === notification.id
+                    )
+                  ) {
+                    return current;
+                  }
+
+
+                  return [
+                    ...current,
+                    notification,
+                  ];
+                }
+              );
+
+
+              return;
+            }
+
+
+            setUnreadByTicket(
+              (current) => ({
+                ...current,
+
+                [ticketId]:
+                  (
+                    current[
+                      ticketId
+                    ]
+                    || 0
+                  )
+                  + 1,
+              })
+            );
+          },
+
+        onReady:
+          () => {
+            console.log(
+              "Harbor staff realtime ready."
+            );
+          },
+
+        onError:
+          (
+            event
+          ) => {
+            console.error(
+              "Harbor staff realtime error:",
+              event
+            );
+          },
+      });
+
+
+    return disconnect;
+
+  }, [
+    user,
+  ]);
+
 
   const handleReview =
     async (
@@ -194,6 +391,7 @@ export default function StaffPage() {
       );
 
       setError("");
+
       setSuccessMessage("");
 
 
@@ -228,14 +426,10 @@ export default function StaffPage() {
         );
 
       } catch (err) {
-        console.error(
-          "Unable to review ticket:",
-          err
-        );
-
-
         setError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || "Unable to review the support ticket."
         );
 
@@ -247,10 +441,6 @@ export default function StaffPage() {
     };
 
 
-  /* =======================================================
-     EXECUTE TICKET
-     ======================================================= */
-
   const handleExecute =
     async (
       ticketId
@@ -260,6 +450,7 @@ export default function StaffPage() {
       );
 
       setError("");
+
       setSuccessMessage("");
 
 
@@ -289,14 +480,10 @@ export default function StaffPage() {
         );
 
       } catch (err) {
-        console.error(
-          "Unable to execute ticket:",
-          err
-        );
-
-
         setError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || "Unable to execute the support ticket."
         );
 
@@ -307,10 +494,6 @@ export default function StaffPage() {
       }
     };
 
-
-  /* =======================================================
-     LOAD TICKET CONVERSATION
-     ======================================================= */
 
   const loadTicketUpdates =
     async (
@@ -339,14 +522,10 @@ export default function StaffPage() {
         );
 
       } catch (err) {
-        console.error(
-          "Unable to load ticket updates:",
-          err
-        );
-
-
         setUpdateError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || "Unable to load ticket conversation."
         );
 
@@ -358,14 +537,30 @@ export default function StaffPage() {
     };
 
 
-  /* =======================================================
-     OPEN / CLOSE CONVERSATION
-     ======================================================= */
+  const markTicketRead =
+    (
+      ticketId
+    ) => {
+      setUnreadByTicket(
+        (current) => ({
+          ...current,
+
+          [ticketId]:
+            0,
+        })
+      );
+    };
+
 
   const toggleConversation =
     async (
       ticketId
     ) => {
+      markTicketRead(
+        ticketId
+      );
+
+
       if (
         expandedTicketId
         === ticketId
@@ -403,10 +598,6 @@ export default function StaffPage() {
     };
 
 
-  /* =======================================================
-     SEND REPLY / INTERNAL NOTE
-     ======================================================= */
-
   const submitTicketUpdate =
     async (
       event,
@@ -440,10 +631,6 @@ export default function StaffPage() {
         let newUpdate;
 
 
-        /* -------------------------------------------------
-           INTERNAL NOTE
-           ------------------------------------------------- */
-
         if (
           updateMode
           === "internal_note"
@@ -458,14 +645,8 @@ export default function StaffPage() {
           setSuccessMessage(
             "Internal note added."
           );
-        }
 
-
-        /* -------------------------------------------------
-           CUSTOMER-VISIBLE STAFF REPLY
-           ------------------------------------------------- */
-
-        else {
+        } else {
           newUpdate =
             await replyToTicket(
               ticketId,
@@ -479,32 +660,6 @@ export default function StaffPage() {
         }
 
 
-        /* =================================================
-           IMPORTANT PERFORMANCE IMPROVEMENT
-
-           Previously:
-
-           POST message
-               ↓
-           wait
-               ↓
-           GET entire conversation
-               ↓
-           wait
-               ↓
-           render
-
-           Now:
-
-           POST message
-               ↓
-           backend returns created update
-               ↓
-           append directly into React state
-               ↓
-           message appears immediately
-           ================================================= */
-
         setTicketUpdates(
           (current) => [
             ...current,
@@ -515,16 +670,11 @@ export default function StaffPage() {
 
         setUpdateContent("");
 
-
       } catch (err) {
-        console.error(
-          "Unable to create ticket update:",
-          err
-        );
-
-
         setUpdateError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || "Unable to add ticket update."
         );
 
@@ -535,10 +685,6 @@ export default function StaffPage() {
       }
     };
 
-
-  /* =======================================================
-     FORMATTING HELPERS
-     ======================================================= */
 
   const formatLabel = (
     value
@@ -557,7 +703,9 @@ export default function StaffPage() {
       )
       .replace(
         /\b\w/g,
-        (character) =>
+        (
+          character
+        ) =>
           character.toUpperCase()
       );
   };
@@ -586,26 +734,95 @@ export default function StaffPage() {
     }
 
 
-    return (
-      date.toLocaleString(
-        undefined,
-        {
-          month:
-            "short",
+    return date.toLocaleString(
+      undefined,
+      {
+        month:
+          "short",
 
-          day:
-            "numeric",
+        day:
+          "numeric",
 
-          year:
-            "numeric",
+        year:
+          "numeric",
 
-          hour:
-            "numeric",
+        hour:
+          "numeric",
 
-          minute:
-            "2-digit",
-        }
+        minute:
+          "2-digit",
+      }
+    );
+  };
+
+
+  const formatRelativeTime = (
+    value
+  ) => {
+    if (!value) {
+      return "";
+    }
+
+
+    const date =
+      new Date(
+        value
+      );
+
+
+    if (
+      Number.isNaN(
+        date.getTime()
       )
+    ) {
+      return "";
+    }
+
+
+    const difference =
+      Date.now()
+      - date.getTime();
+
+
+    if (
+      difference
+      < 60000
+    ) {
+      return "Now";
+    }
+
+
+    if (
+      difference
+      < 3600000
+    ) {
+      return (
+        `${Math.floor(
+          difference
+          / 60000
+        )}m`
+      );
+    }
+
+
+    if (
+      difference
+      < 86400000
+    ) {
+      return (
+        `${Math.floor(
+          difference
+          / 3600000
+        )}h`
+      );
+    }
+
+
+    return (
+      `${Math.floor(
+        difference
+        / 86400000
+      )}d`
     );
   };
 
@@ -613,15 +830,8 @@ export default function StaffPage() {
   const getSeverityClass = (
     severity
   ) => {
-    const value =
-      String(
-        severity
-        || ""
-      ).toLowerCase();
-
-
     if (
-      value
+      severity
       === "critical"
     ) {
       return (
@@ -631,8 +841,8 @@ export default function StaffPage() {
 
 
     if (
-      value === "high"
-      || value === "medium"
+      severity === "high"
+      || severity === "medium"
     ) {
       return (
         "badge badge-warning"
@@ -650,10 +860,14 @@ export default function StaffPage() {
     status
   ) => {
     if (
-      status === "open"
-      || status === "in_progress"
-      || status === "resolved"
-      || status === "closed"
+      [
+        "open",
+        "in_progress",
+        "resolved",
+        "closed",
+      ].includes(
+        status
+      )
     ) {
       return (
         "badge badge-success"
@@ -662,8 +876,12 @@ export default function StaffPage() {
 
 
     if (
-      status === "rejected"
-      || status === "failed"
+      [
+        "rejected",
+        "failed",
+      ].includes(
+        status
+      )
     ) {
       return (
         "badge badge-danger"
@@ -684,9 +902,7 @@ export default function StaffPage() {
       update.update_type
       === "internal_note"
     ) {
-      return (
-        "Internal Note"
-      );
+      return "Internal Note";
     }
 
 
@@ -710,10 +926,6 @@ export default function StaffPage() {
   };
 
 
-  /* =======================================================
-     WORKFLOW GROUPS
-     ======================================================= */
-
   const groups =
     useMemo(
       () => ({
@@ -724,38 +936,39 @@ export default function StaffPage() {
               === "pending_approval"
           ),
 
-
         approved:
           tickets.filter(
             (ticket) =>
-              ticket.status
-              === "approved"
-              || ticket.status
-              === "executing"
+              [
+                "approved",
+                "executing",
+              ].includes(
+                ticket.status
+              )
           ),
-
 
         successful:
           tickets.filter(
             (ticket) =>
-              ticket.status
-              === "open"
-              || ticket.status
-              === "in_progress"
-              || ticket.status
-              === "resolved"
-              || ticket.status
-              === "closed"
+              [
+                "open",
+                "in_progress",
+                "resolved",
+                "closed",
+              ].includes(
+                ticket.status
+              )
           ),
-
 
         rejected:
           tickets.filter(
             (ticket) =>
-              ticket.status
-              === "rejected"
-              || ticket.status
-              === "failed"
+              [
+                "rejected",
+                "failed",
+              ].includes(
+                ticket.status
+              )
           ),
       }),
       [
@@ -763,10 +976,6 @@ export default function StaffPage() {
       ]
     );
 
-
-  /* =======================================================
-     FILTER ACTIVE TAB
-     ======================================================= */
 
   const filteredActiveGroup =
     useMemo(
@@ -777,52 +986,50 @@ export default function StaffPage() {
             .toLowerCase();
 
 
-        const currentGroup =
+        return (
           groups[
             activeTab
-          ] || [];
+          ]
+          || []
+        ).filter(
+          (
+            ticket
+          ) => {
+            const searchableText = [
+              ticket.id,
+              ticket.title,
+              ticket.description,
+              ticket.customer
+                ?.full_name,
+              ticket.customer
+                ?.email,
+              ticket.customer
+                ?.country,
+            ]
+              .filter(
+                Boolean
+              )
+              .join(
+                " "
+              )
+              .toLowerCase();
 
 
-        return (
-          currentGroup.filter(
-            (ticket) => {
-              const searchableText = [
-                ticket.id,
-                ticket.title,
-                ticket.description,
-                ticket.customer?.full_name,
-                ticket.customer?.email,
-                ticket.customer?.country,
-              ]
-                .filter(
-                  Boolean
-                )
-                .join(
-                  " "
-                )
-                .toLowerCase();
-
-
-              const matchesSearch =
+            return (
+              (
                 !query
                 || searchableText.includes(
                   query
-                );
-
-
-              const matchesSeverity =
+                )
+              )
+              && (
                 severityFilter
                 === "all"
                 || ticket.severity
-                === severityFilter;
-
-
-              return (
-                matchesSearch
-                && matchesSeverity
-              );
-            }
-          )
+                === severityFilter
+              )
+            );
+          }
         );
       },
       [
@@ -833,10 +1040,6 @@ export default function StaffPage() {
       ]
     );
 
-
-  /* =======================================================
-     DASHBOARD STATS
-     ======================================================= */
 
   const statistics =
     useMemo(
@@ -860,9 +1063,28 @@ export default function StaffPage() {
     );
 
 
-  /* =======================================================
-     TAB CONFIGURATION
-     ======================================================= */
+  const totalUnreadNotifications =
+    useMemo(
+      () =>
+        Object.values(
+          unreadByTicket
+        ).reduce(
+          (
+            total,
+            count
+          ) =>
+            total
+            + Number(
+              count
+              || 0
+            ),
+          0
+        ),
+      [
+        unreadByTicket,
+      ]
+    );
+
 
   const tabConfig = {
     pending: {
@@ -873,7 +1095,6 @@ export default function StaffPage() {
         "New customer escalations waiting for a human decision.",
     },
 
-
     approved: {
       title:
         "Approved / Ready to Execute",
@@ -882,7 +1103,6 @@ export default function StaffPage() {
         "Approved tickets ready for controlled execution.",
     },
 
-
     successful: {
       title:
         "Successful / Processed",
@@ -890,7 +1110,6 @@ export default function StaffPage() {
       description:
         "Processed tickets progressing through support.",
     },
-
 
     rejected: {
       title:
@@ -902,750 +1121,771 @@ export default function StaffPage() {
   };
 
 
-  const clearFilters = () => {
-    setSearchQuery("");
+  const clearFilters =
+    () => {
+      setSearchQuery("");
 
-    setSeverityFilter(
-      "all"
-    );
-  };
-
-
-  /* =======================================================
-     TICKET CARD
-     ======================================================= */
-
-  const renderTicketCard = (
-    ticket
-  ) => {
-    const isProcessing =
-      processingTicketId
-      === ticket.id;
+      setSeverityFilter(
+        "all"
+      );
+    };
 
 
-    const pendingApproval =
-      ticket.approval_status
-      === "pending";
+  const getStaffTabForStatus =
+    (
+      status
+    ) => {
+      if (
+        status
+        === "pending_approval"
+      ) {
+        return "pending";
+      }
 
 
-    const canExecute =
-      ticket.approval_status
-      === "approved"
-      && (
-        ticket.status
-        === "approved"
-        || ticket.status
-        === "executing"
-      )
-      && !ticket.monday_item_id;
-
-
-    const customer =
-      ticket.customer;
-
-
-    const customerName =
-      customer?.full_name
-      || "Unknown customer";
-
-
-    const customerInitial =
-      customerName
-        .charAt(
-          0
+      if (
+        [
+          "approved",
+          "executing",
+        ].includes(
+          status
         )
-        .toUpperCase();
+      ) {
+        return "approved";
+      }
 
 
-    const conversationOpen =
-      expandedTicketId
-      === ticket.id;
+      if (
+        [
+          "rejected",
+          "failed",
+        ].includes(
+          status
+        )
+      ) {
+        return "rejected";
+      }
 
 
-    return (
-      <article
-        key={
+      return "successful";
+    };
+
+
+  const openTicketFromNotification =
+    async (
+      notification
+    ) => {
+      const ticketId =
+        notification.ticket_id;
+
+
+      if (!ticketId) {
+        return;
+      }
+
+
+      setNotificationMenuOpen(
+        false
+      );
+
+      markTicketRead(
+        ticketId
+      );
+
+      setSearchQuery("");
+
+      setSeverityFilter(
+        "all"
+      );
+
+      setActiveTab(
+        getStaffTabForStatus(
+          notification.ticket
+            ?.status
+        )
+      );
+
+      setExpandedTicketId(
+        ticketId
+      );
+
+      setUpdateMode(
+        "reply"
+      );
+
+
+      await Promise.all([
+        loadTickets(),
+
+        loadTicketUpdates(
+          ticketId
+        ),
+      ]);
+    };
+
+
+  const renderTicketCard =
+    (
+      ticket
+    ) => {
+      const isProcessing =
+        processingTicketId
+        === ticket.id;
+
+      const pendingApproval =
+        ticket.approval_status
+        === "pending";
+
+      const canExecute =
+        ticket.approval_status
+        === "approved"
+        && [
+          "approved",
+          "executing",
+        ].includes(
+          ticket.status
+        )
+        && !ticket.monday_item_id;
+
+      const customer =
+        ticket.customer;
+
+      const customerName =
+        customer?.full_name
+        || "Unknown customer";
+
+      const customerInitial =
+        customerName
+          .charAt(0)
+          .toUpperCase();
+
+      const conversationOpen =
+        expandedTicketId
+        === ticket.id;
+
+      const unreadCount =
+        unreadByTicket[
           ticket.id
-        }
-        className="ticket-card"
-      >
-
-        {/* =================================================
-            HEADER
-            ================================================= */}
-
-        <div className="ticket-card-top">
-
-          <div className="ticket-main-info">
-
-            <div className="ticket-title-row">
-
-              <h3>
-                {ticket.title
-                  || "Support Ticket"}
-              </h3>
+        ]
+        || 0;
 
 
-              <span
-                className={
-                  getSeverityClass(
+      return (
+        <article
+          key={
+            ticket.id
+          }
+          className="ticket-card"
+        >
+
+          <div className="ticket-card-top">
+
+            <div className="ticket-main-info">
+
+              <div className="ticket-title-row">
+
+                <h3>
+                  {ticket.title
+                    || "Support Ticket"}
+                </h3>
+
+
+                <span
+                  className={
+                    getSeverityClass(
+                      ticket.severity
+                    )
+                  }
+                >
+                  {formatLabel(
                     ticket.severity
-                  )
-                }
-              >
-                {formatLabel(
-                  ticket.severity
+                  )}
+                </span>
+
+              </div>
+
+
+              <span className="ticket-number">
+                Ticket{" "}
+                {String(
+                  ticket.id
+                ).slice(
+                  0,
+                  8
                 )}
               </span>
 
             </div>
 
 
-            <span className="ticket-number">
-              Ticket{" "}
-              {String(
-                ticket.id
-              ).slice(
-                0,
-                8
-              )}
-            </span>
-
-          </div>
-
-
-          <span
-            className={
-              getStatusClass(
-                ticket.status
-              )
-            }
-          >
-            {formatLabel(
-              ticket.status
-            )}
-          </span>
-
-        </div>
-
-
-        {/* =================================================
-            CUSTOMER INFORMATION
-            ================================================= */}
-
-        <div className="ticket-customer-panel">
-
-          <div className="ticket-customer-avatar">
-            {customerInitial}
-          </div>
-
-
-          <div className="ticket-customer-content">
-
-            <span className="ticket-customer-label">
-              Customer
-            </span>
-
-
-            <strong className="ticket-customer-name">
-              {customerName}
-            </strong>
-
-
-            {customer?.email && (
-              <span className="ticket-customer-email">
-                {customer.email}
-              </span>
-            )}
-
-          </div>
-
-
-          <div className="ticket-customer-details">
-
-            <div>
-
-              <span>
-                Country
-              </span>
-
-              <strong>
-                {customer?.country
-                  || "Not provided"}
-              </strong>
-
-            </div>
-
-
-            <div>
-
-              <span>
-                Age
-              </span>
-
-              <strong>
-                {customer?.age
-                  ?? "Not provided"}
-              </strong>
-
-            </div>
-
-          </div>
-
-        </div>
-
-
-        {/* =================================================
-            CUSTOMER REQUEST
-            ================================================= */}
-
-        {ticket.description && (
-          <div className="ticket-request">
-
-            <span className="ticket-request-label">
-              Customer request
-            </span>
-
-
-            <p className="ticket-description">
-              {ticket.description}
-            </p>
-
-          </div>
-        )}
-
-
-        {/* =================================================
-            METADATA
-            ================================================= */}
-
-        <div className="ticket-metadata-grid">
-
-          <div>
-
-            <span>
-              Approval
-            </span>
-
-            <strong>
-              {formatLabel(
-                ticket.approval_status
-              )}
-            </strong>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              Severity
-            </span>
-
-            <strong>
-              {formatLabel(
-                ticket.severity
-              )}
-            </strong>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              Workflow
-            </span>
-
-            <strong>
-              {formatLabel(
-                ticket.status
-              )}
-            </strong>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              Monday
-            </span>
-
-            <strong>
-              {ticket.monday_item_id
-                ? "Synchronized"
-                : "Not synchronized"}
-            </strong>
-
-          </div>
-
-        </div>
-
-
-        {/* =================================================
-            MONDAY STATUS
-            ================================================= */}
-
-        {ticket.monday_item_id && (
-          <div className="integration-status">
-
-            <div className="integration-icon">
-              M
-            </div>
-
-
-            <div>
-
-              <strong>
-                Monday.com synchronized
-              </strong>
-
-              <span>
-                Item ID:{" "}
-                {ticket.monday_item_id}
-              </span>
-
-            </div>
-
-          </div>
-        )}
-
-
-        {/* =================================================
-            FAILURE
-            ================================================= */}
-
-        {ticket.failure_reason && (
-          <div className="alert alert-error ticket-alert">
-
-            <div>
-
-              <strong>
-                Execution failure
-              </strong>
-
-              <span>
-                {ticket.failure_reason}
-              </span>
-
-            </div>
-
-          </div>
-        )}
-
-
-        {/* =================================================
-            ACTIONS
-            ================================================= */}
-
-        <div className="ticket-card-footer">
-
-          <div className="ticket-footer-left">
-
-            <button
-              type="button"
-              className="ticket-conversation-button"
-              onClick={() =>
-                toggleConversation(
-                  ticket.id
+            <span
+              className={
+                getStatusClass(
+                  ticket.status
                 )
               }
             >
-              {conversationOpen
-                ? "Hide conversation"
-                : "💬 Conversation"}
-            </button>
+              {formatLabel(
+                ticket.status
+              )}
+            </span>
 
           </div>
 
 
-          <div className="ticket-actions">
+          <div className="ticket-customer-panel">
 
-            {pendingApproval && (
-              <>
-
-                <button
-                  type="button"
-                  className="approve-button"
-                  disabled={
-                    isProcessing
-                  }
-                  onClick={() =>
-                    handleReview(
-                      ticket.id,
-                      true
-                    )
-                  }
-                >
-                  {isProcessing
-                    ? "Processing..."
-                    : "✓ Approve"}
-                </button>
+            <div className="ticket-customer-avatar">
+              {customerInitial}
+            </div>
 
 
-                <button
-                  type="button"
-                  className="reject-button"
-                  disabled={
-                    isProcessing
-                  }
-                  onClick={() =>
-                    handleReview(
-                      ticket.id,
-                      false
-                    )
-                  }
-                >
-                  {isProcessing
-                    ? "Processing..."
-                    : "Reject"}
-                </button>
+            <div className="ticket-customer-content">
 
-              </>
-            )}
+              <span className="ticket-customer-label">
+                Customer
+              </span>
+
+              <strong className="ticket-customer-name">
+                {customerName}
+              </strong>
 
 
-            {canExecute && (
-              <button
-                type="button"
-                className="execute-button"
-                disabled={
-                  isProcessing
-                }
-                onClick={() =>
-                  handleExecute(
-                    ticket.id
-                  )
-                }
-              >
-                {isProcessing
-                  ? "Executing..."
-                  : "Execute →"}
-              </button>
-            )}
+              {customer?.email && (
+                <span className="ticket-customer-email">
+                  {customer.email}
+                </span>
+              )}
 
-          </div>
-
-        </div>
+            </div>
 
 
-        {/* =================================================
-            TICKET ID
-            ================================================= */}
-
-        <div className="ticket-id-full">
-
-          <span>
-            Ticket ID
-          </span>
-
-          <code>
-            {ticket.id}
-          </code>
-
-        </div>
-
-
-        {/* =================================================
-            CONVERSATION PANEL
-            ================================================= */}
-
-        {conversationOpen && (
-          <div className="ticket-conversation-panel">
-
-            <div className="ticket-conversation-header">
+            <div className="ticket-customer-details">
 
               <div>
 
-                <h4>
-                  Case Conversation
-                </h4>
+                <span>
+                  Country
+                </span>
 
-                <p>
-                  Customer messages, staff replies,
-                  and private internal notes.
-                </p>
+                <strong>
+                  {customer?.country
+                    || "Not provided"}
+                </strong>
 
               </div>
 
 
+              <div>
+
+                <span>
+                  Age
+                </span>
+
+                <strong>
+                  {customer?.age
+                    ?? "Not provided"}
+                </strong>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          {ticket.description && (
+            <div className="ticket-request">
+
+              <span className="ticket-request-label">
+                Customer request
+              </span>
+
+              <p className="ticket-description">
+                {ticket.description}
+              </p>
+
+            </div>
+          )}
+
+
+          <div className="ticket-metadata-grid">
+
+            <div>
+              <span>
+                Approval
+              </span>
+
+              <strong>
+                {formatLabel(
+                  ticket.approval_status
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Severity
+              </span>
+
+              <strong>
+                {formatLabel(
+                  ticket.severity
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Workflow
+              </span>
+
+              <strong>
+                {formatLabel(
+                  ticket.status
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Monday
+              </span>
+
+              <strong>
+                {ticket.monday_item_id
+                  ? "Synchronized"
+                  : "Not synchronized"}
+              </strong>
+            </div>
+
+          </div>
+
+
+          {ticket.monday_item_id && (
+            <div className="integration-status">
+
+              <div className="integration-icon">
+                M
+              </div>
+
+              <div>
+
+                <strong>
+                  Monday.com synchronized
+                </strong>
+
+                <span>
+                  Item ID:{" "}
+                  {ticket.monday_item_id}
+                </span>
+
+              </div>
+
+            </div>
+          )}
+
+
+          {ticket.failure_reason && (
+            <div className="alert alert-error ticket-alert">
+
+              <div>
+
+                <strong>
+                  Execution failure
+                </strong>
+
+                <span>
+                  {ticket.failure_reason}
+                </span>
+
+              </div>
+
+            </div>
+          )}
+
+
+          <div className="ticket-card-footer">
+
+            <div className="ticket-footer-left">
+
               <button
                 type="button"
-                className="conversation-refresh-button"
+                className="ticket-conversation-button ticket-conversation-button-unread"
                 onClick={() =>
-                  loadTicketUpdates(
+                  toggleConversation(
                     ticket.id
                   )
                 }
-                aria-label="Refresh conversation"
               >
-                ↻
-              </button>
-
-            </div>
-
-
-            {/* ---------------------------------------------
-                LOADING
-                --------------------------------------------- */}
-
-            {updatesLoading
-              ? (
-                <div className="conversation-loading">
-                  Loading conversation...
-                </div>
-              )
-
-
-              /* -------------------------------------------
-                 EMPTY
-                 ------------------------------------------- */
-
-              : ticketUpdates.length
-                === 0
-                ? (
-                  <div className="conversation-empty">
-                    No conversation messages yet.
-                  </div>
-                )
-
-
-                /* -----------------------------------------
-                   UPDATE LIST
-                   ----------------------------------------- */
-
-                : (
-                  <div className="ticket-update-list">
-
-                    {ticketUpdates.map(
-                      (update) => {
-                        const internal =
-                          update.update_type
-                          === "internal_note";
-
-
-                        const customerReply =
-                          update.update_type
-                          === "customer_reply";
-
-
-                        return (
-                          <div
-                            key={
-                              update.id
-                            }
-                            className={
-                              internal
-                                ? (
-                                  "ticket-update "
-                                  + "ticket-update-internal"
-                                )
-                                : customerReply
-                                  ? (
-                                    "ticket-update "
-                                    + "ticket-update-customer"
-                                  )
-                                  : (
-                                    "ticket-update "
-                                    + "ticket-update-staff"
-                                  )
-                            }
-                          >
-
-                            <div className="ticket-update-top">
-
-                              <strong>
-                                {getAuthorLabel(
-                                  update
-                                )}
-                              </strong>
-
-
-                              <span>
-                                {formatDate(
-                                  update.created_at
-                                )}
-                              </span>
-
-                            </div>
-
-
-                            <p>
-                              {update.content}
-                            </p>
-
-
-                            {internal && (
-                              <span className="internal-note-label">
-                                Staff only
-                              </span>
-                            )}
-
-                          </div>
-                        );
-                      }
-                    )}
-
-                  </div>
-                )}
-
-
-            {/* ---------------------------------------------
-                ERROR
-                --------------------------------------------- */}
-
-            {updateError && (
-              <div className="conversation-error">
-                {updateError}
-              </div>
-            )}
-
-
-            {/* ---------------------------------------------
-                REPLY / INTERNAL NOTE TABS
-                --------------------------------------------- */}
-
-            <div className="ticket-update-mode-tabs">
-
-              <button
-                type="button"
-                className={
-                  updateMode
-                  === "reply"
-                    ? (
-                      "update-mode-button "
-                      + "update-mode-button-active"
-                    )
-                    : "update-mode-button"
-                }
-                onClick={() =>
-                  setUpdateMode(
-                    "reply"
-                  )
-                }
-              >
-                Reply to customer
-              </button>
-
-
-              <button
-                type="button"
-                className={
-                  updateMode
-                  === "internal_note"
-                    ? (
-                      "update-mode-button "
-                      + "update-mode-button-active"
-                    )
-                    : "update-mode-button"
-                }
-                onClick={() =>
-                  setUpdateMode(
-                    "internal_note"
-                  )
-                }
-              >
-                Internal note
-              </button>
-
-            </div>
-
-
-            {/* ---------------------------------------------
-                MESSAGE COMPOSER
-                --------------------------------------------- */}
-
-            <form
-              className="ticket-update-composer"
-              onSubmit={(event) =>
-                submitTicketUpdate(
-                  event,
-                  ticket.id
-                )
-              }
-            >
-
-              <textarea
-                rows="3"
-                value={
-                  updateContent
-                }
-                onChange={(event) =>
-                  setUpdateContent(
-                    event.target.value
-                  )
-                }
-                placeholder={
-                  updateMode
-                  === "internal_note"
-                    ? (
-                      "Add a private note "
-                      + "for support staff..."
-                    )
-                    : (
-                      "Write a reply "
-                      + "to the customer..."
-                    )
-                }
-                disabled={
-                  updateSubmitting
-                }
-              />
-
-
-              <div className="ticket-update-composer-footer">
 
                 <span>
-                  {updateMode
-                  === "internal_note"
-                    ? (
-                      "Only support staff "
-                      + "can see this note."
-                    )
-                    : (
-                      "The customer will "
-                      + "see this reply."
-                    )}
+                  {conversationOpen
+                    ? "Hide conversation"
+                    : "💬 Conversation"}
                 </span>
 
 
+                {!conversationOpen
+                  && unreadCount > 0
+                  && (
+                    <span className="conversation-unread-badge">
+
+                      {unreadCount > 9
+                        ? "9+"
+                        : unreadCount}
+
+                    </span>
+                  )}
+
+              </button>
+
+            </div>
+
+
+            <div className="ticket-actions">
+
+              {pendingApproval && (
+                <>
+
+                  <button
+                    type="button"
+                    className="approve-button"
+                    disabled={
+                      isProcessing
+                    }
+                    onClick={() =>
+                      handleReview(
+                        ticket.id,
+                        true
+                      )
+                    }
+                  >
+                    {isProcessing
+                      ? "Processing..."
+                      : "✓ Approve"}
+                  </button>
+
+
+                  <button
+                    type="button"
+                    className="reject-button"
+                    disabled={
+                      isProcessing
+                    }
+                    onClick={() =>
+                      handleReview(
+                        ticket.id,
+                        false
+                      )
+                    }
+                  >
+                    {isProcessing
+                      ? "Processing..."
+                      : "Reject"}
+                  </button>
+
+                </>
+              )}
+
+
+              {canExecute && (
                 <button
-                  type="submit"
-                  className={
-                    updateMode
-                    === "internal_note"
-                      ? "internal-note-submit"
-                      : "reply-submit"
-                  }
+                  type="button"
+                  className="execute-button"
                   disabled={
-                    updateSubmitting
-                    || !updateContent.trim()
+                    isProcessing
+                  }
+                  onClick={() =>
+                    handleExecute(
+                      ticket.id
+                    )
                   }
                 >
-                  {updateSubmitting
-                    ? "Saving..."
-                    : updateMode
-                      === "internal_note"
-                        ? "Add note"
-                        : "Send reply"}
+                  {isProcessing
+                    ? "Executing..."
+                    : "Execute →"}
+                </button>
+              )}
+
+            </div>
+
+          </div>
+
+
+          <div className="ticket-id-full">
+
+            <span>
+              Ticket ID
+            </span>
+
+            <code>
+              {ticket.id}
+            </code>
+
+          </div>
+
+
+          {conversationOpen && (
+            <div className="ticket-conversation-panel">
+
+              <div className="ticket-conversation-header">
+
+                <div>
+
+                  <h4>
+                    Case Conversation
+                  </h4>
+
+                  <p>
+                    Customer messages, staff replies,
+                    and private internal notes.
+                  </p>
+
+                </div>
+
+
+                <button
+                  type="button"
+                  className="conversation-refresh-button"
+                  onClick={() =>
+                    loadTicketUpdates(
+                      ticket.id
+                    )
+                  }
+                >
+                  ↻
                 </button>
 
               </div>
 
-            </form>
 
-          </div>
-        )}
+              {updatesLoading
+                ? (
+                  <div className="conversation-loading">
+                    Loading conversation...
+                  </div>
+                )
 
-      </article>
-    );
-  };
+                : ticketUpdates.length === 0
+                  ? (
+                    <div className="conversation-empty">
+                      No conversation messages yet.
+                    </div>
+                  )
+
+                  : (
+                    <div className="ticket-update-list">
+
+                      {ticketUpdates.map(
+                        (
+                          update
+                        ) => {
+                          const internal =
+                            update.update_type
+                            === "internal_note";
+
+                          const customerReply =
+                            update.update_type
+                            === "customer_reply";
 
 
-  /* =======================================================
-     LOADING SCREEN
-     ======================================================= */
+                          return (
+                            <div
+                              key={
+                                update.id
+                              }
+                              className={
+                                internal
+                                  ? (
+                                    "ticket-update "
+                                    + "ticket-update-internal"
+                                  )
+                                  : customerReply
+                                    ? (
+                                      "ticket-update "
+                                      + "ticket-update-customer"
+                                    )
+                                    : (
+                                      "ticket-update "
+                                      + "ticket-update-staff"
+                                    )
+                              }
+                            >
+
+                              <div className="ticket-update-top">
+
+                                <strong>
+                                  {getAuthorLabel(
+                                    update
+                                  )}
+                                </strong>
+
+                                <span>
+                                  {formatDate(
+                                    update.created_at
+                                  )}
+                                </span>
+
+                              </div>
+
+
+                              <p>
+                                {update.content}
+                              </p>
+
+
+                              {internal && (
+                                <span className="internal-note-label">
+                                  Staff only
+                                </span>
+                              )}
+
+                            </div>
+                          );
+                        }
+                      )}
+
+                    </div>
+                  )}
+
+
+              {updateError && (
+                <div className="conversation-error">
+                  {updateError}
+                </div>
+              )}
+
+
+              <div className="ticket-update-mode-tabs">
+
+                <button
+                  type="button"
+                  className={
+                    updateMode
+                    === "reply"
+                      ? (
+                        "update-mode-button "
+                        + "update-mode-button-active"
+                      )
+                      : "update-mode-button"
+                  }
+                  onClick={() =>
+                    setUpdateMode(
+                      "reply"
+                    )
+                  }
+                >
+                  Reply to customer
+                </button>
+
+
+                <button
+                  type="button"
+                  className={
+                    updateMode
+                    === "internal_note"
+                      ? (
+                        "update-mode-button "
+                        + "update-mode-button-active"
+                      )
+                      : "update-mode-button"
+                  }
+                  onClick={() =>
+                    setUpdateMode(
+                      "internal_note"
+                    )
+                  }
+                >
+                  Internal note
+                </button>
+
+              </div>
+
+
+              <form
+                className="ticket-update-composer"
+                onSubmit={(event) =>
+                  submitTicketUpdate(
+                    event,
+                    ticket.id
+                  )
+                }
+              >
+
+                <textarea
+                  rows="3"
+                  value={
+                    updateContent
+                  }
+                  onChange={(event) =>
+                    setUpdateContent(
+                      event.target.value
+                    )
+                  }
+                  placeholder={
+                    updateMode
+                    === "internal_note"
+                      ? "Add a private note for support staff..."
+                      : "Write a reply to the customer..."
+                  }
+                  disabled={
+                    updateSubmitting
+                  }
+                />
+
+
+                <div className="ticket-update-composer-footer">
+
+                  <span>
+                    {updateMode
+                    === "internal_note"
+                      ? (
+                        "Only support staff "
+                        + "can see this note."
+                      )
+                      : (
+                        "The customer will "
+                        + "see this reply."
+                      )}
+                  </span>
+
+
+                  <button
+                    type="submit"
+                    className={
+                      updateMode
+                      === "internal_note"
+                        ? "internal-note-submit"
+                        : "reply-submit"
+                    }
+                    disabled={
+                      updateSubmitting
+                      || !updateContent.trim()
+                    }
+                  >
+                    {updateSubmitting
+                      ? "Saving..."
+                      : updateMode
+                        === "internal_note"
+                          ? "Add note"
+                          : "Send reply"}
+                  </button>
+
+                </div>
+
+              </form>
+
+            </div>
+          )}
+
+        </article>
+      );
+    };
+
 
   if (loading) {
     return (
@@ -1666,21 +1906,12 @@ export default function StaffPage() {
   }
 
 
-  /* =======================================================
-     PAGE
-     ======================================================= */
-
   return (
     <div className="app-page staff-app-page">
 
       <div className="background-orb app-orb-one" />
-
       <div className="background-orb app-orb-two" />
 
-
-      {/* ===================================================
-          TOP BAR
-          =================================================== */}
 
       <nav className="topbar">
 
@@ -1691,7 +1922,6 @@ export default function StaffPage() {
             <div className="brand-icon brand-icon-small">
               H
             </div>
-
 
             <div>
 
@@ -1723,13 +1953,203 @@ export default function StaffPage() {
 
           <div className="topbar-actions">
 
+            <div
+              className="notification-menu-wrapper"
+              ref={
+                notificationMenuRef
+              }
+            >
+
+              <button
+                type="button"
+                className="notification-bell-button"
+                onClick={() =>
+                  setNotificationMenuOpen(
+                    (
+                      current
+                    ) =>
+                      !current
+                  )
+                }
+                aria-label="Notifications"
+              >
+                🔔
+
+
+                {totalUnreadNotifications > 0 && (
+                  <span className="notification-bell-badge">
+
+                    {totalUnreadNotifications > 9
+                      ? "9+"
+                      : totalUnreadNotifications}
+
+                  </span>
+                )}
+
+              </button>
+
+
+              {notificationMenuOpen && (
+                <div className="notification-dropdown">
+
+                  <div className="notification-dropdown-header">
+
+                    <div>
+
+                      <strong>
+                        Notifications
+                      </strong>
+
+                      <span>
+                        Customer messages
+                      </span>
+
+                    </div>
+
+
+                    {totalUnreadNotifications > 0 && (
+                      <span className="notification-dropdown-count">
+                        {totalUnreadNotifications}
+                      </span>
+                    )}
+
+                  </div>
+
+
+                  <div className="notification-dropdown-list">
+
+                    {messageNotifications.length === 0
+                      ? (
+                        <div className="notification-dropdown-empty">
+
+                          <div>
+                            ✓
+                          </div>
+
+                          <strong>
+                            You're all caught up
+                          </strong>
+
+                          <span>
+                            New customer replies will appear here.
+                          </span>
+
+                        </div>
+                      )
+
+                      : messageNotifications.map(
+                        (
+                          notification
+                        ) => {
+                          const ticketId =
+                            notification.ticket_id;
+
+                          const unread =
+                            (
+                              unreadByTicket[
+                                ticketId
+                              ]
+                              || 0
+                            ) > 0;
+
+                          const customerName =
+                            notification
+                              .author
+                              ?.full_name
+                            || notification
+                              .author
+                              ?.email
+                            || "Customer";
+
+
+                          return (
+                            <button
+                              key={
+                                notification.id
+                              }
+                              type="button"
+                              className={
+                                unread
+                                  ? (
+                                    "notification-dropdown-item "
+                                    + "notification-dropdown-item-unread"
+                                  )
+                                  : "notification-dropdown-item"
+                              }
+                              onClick={() =>
+                                openTicketFromNotification(
+                                  notification
+                                )
+                              }
+                            >
+
+                              <div className="notification-dropdown-avatar">
+
+                                {customerName
+                                  .charAt(
+                                    0
+                                  )
+                                  .toUpperCase()}
+
+                              </div>
+
+
+                              <div className="notification-dropdown-copy">
+
+                                <div className="notification-dropdown-title">
+
+                                  <strong>
+                                    {customerName}
+                                  </strong>
+
+
+                                  {unread && (
+                                    <span className="notification-unread-dot" />
+                                  )}
+
+                                </div>
+
+
+                                <p>
+                                  {notification.content}
+                                </p>
+
+
+                                <div className="notification-dropdown-footer">
+
+                                  <span>
+                                    {notification.ticket?.title
+                                      || "Support Ticket"}
+                                  </span>
+
+                                  <span>
+                                    {formatRelativeTime(
+                                      notification.created_at
+                                    )}
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                            </button>
+                          );
+                        }
+                      )}
+
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+
             <div className="user-chip">
 
               <div className="avatar">
                 {user?.email
-                  ?.charAt(
-                    0
-                  )
+                  ?.charAt(0)
                   ?.toUpperCase()
                   || "S"}
               </div>
@@ -1767,15 +2187,7 @@ export default function StaffPage() {
       </nav>
 
 
-      {/* ===================================================
-          MAIN
-          =================================================== */}
-
       <main className="staff-page">
-
-        {/* =================================================
-            HERO
-            ================================================= */}
 
         <section className="staff-hero">
 
@@ -1785,16 +2197,13 @@ export default function StaffPage() {
               OPERATIONS CONSOLE
             </span>
 
-
             <h1>
               Support Operations
             </h1>
 
-
             <p>
-              Review escalations, communicate
-              with customers, approve actions,
-              and monitor support workflows.
+              Review escalations, communicate with customers,
+              approve actions, and monitor support workflows.
             </p>
 
           </div>
@@ -1821,20 +2230,10 @@ export default function StaffPage() {
         </section>
 
 
-        {/* =================================================
-            STATS
-            ================================================= */}
-
         <section className="stats-grid">
 
           <div className="stat-card glass-card">
-
-            <div className="stat-icon stat-icon-primary">
-              ◎
-            </div>
-
             <div>
-
               <span>
                 Total tickets
               </span>
@@ -1842,20 +2241,12 @@ export default function StaffPage() {
               <strong>
                 {statistics.total}
               </strong>
-
             </div>
-
           </div>
 
 
           <div className="stat-card glass-card">
-
-            <div className="stat-icon stat-icon-warning">
-              ◷
-            </div>
-
             <div>
-
               <span>
                 Pending review
               </span>
@@ -1863,20 +2254,12 @@ export default function StaffPage() {
               <strong>
                 {statistics.pending}
               </strong>
-
             </div>
-
           </div>
 
 
           <div className="stat-card glass-card">
-
-            <div className="stat-icon stat-icon-primary">
-              ✓
-            </div>
-
             <div>
-
               <span>
                 Approved
               </span>
@@ -1884,20 +2267,12 @@ export default function StaffPage() {
               <strong>
                 {statistics.approved}
               </strong>
-
             </div>
-
           </div>
 
 
           <div className="stat-card glass-card">
-
-            <div className="stat-icon stat-icon-success">
-              ✓
-            </div>
-
             <div>
-
               <span>
                 Successful
               </span>
@@ -1905,59 +2280,25 @@ export default function StaffPage() {
               <strong>
                 {statistics.successful}
               </strong>
-
             </div>
-
           </div>
 
         </section>
 
 
-        {/* =================================================
-            ALERTS
-            ================================================= */}
-
         {error && (
           <div className="alert alert-error">
-
-            <div>
-
-              <strong>
-                Operation failed
-              </strong>
-
-              <span>
-                {error}
-              </span>
-
-            </div>
-
+            {error}
           </div>
         )}
 
 
         {successMessage && (
           <div className="alert alert-success">
-
-            <div>
-
-              <strong>
-                Success
-              </strong>
-
-              <span>
-                {successMessage}
-              </span>
-
-            </div>
-
+            {successMessage}
           </div>
         )}
 
-
-        {/* =================================================
-            SEARCH / FILTER
-            ================================================= */}
 
         <section className="staff-filter-bar glass-card">
 
@@ -1966,7 +2307,6 @@ export default function StaffPage() {
             <span className="staff-search-icon">
               ⌕
             </span>
-
 
             <input
               type="text"
@@ -1992,7 +2332,6 @@ export default function StaffPage() {
                 Severity
               </span>
 
-
               <select
                 value={
                   severityFilter
@@ -2003,7 +2342,6 @@ export default function StaffPage() {
                   )
                 }
               >
-
                 <option value="all">
                   All severities
                 </option>
@@ -2023,7 +2361,6 @@ export default function StaffPage() {
                 <option value="critical">
                   Critical
                 </option>
-
               </select>
 
             </label>
@@ -2048,10 +2385,6 @@ export default function StaffPage() {
         </section>
 
 
-        {/* =================================================
-            WORKFLOW TABS
-            ================================================= */}
-
         <div className="staff-view-tabs">
 
           {[
@@ -2059,17 +2392,14 @@ export default function StaffPage() {
               "pending",
               "Pending Review",
             ],
-
             [
               "approved",
               "Approved",
             ],
-
             [
               "successful",
               "Successful",
             ],
-
             [
               "rejected",
               "Rejected / Failed",
@@ -2108,7 +2438,6 @@ export default function StaffPage() {
 
                 {label}
 
-
                 <span className="staff-tab-count">
                   {
                     groups[
@@ -2124,10 +2453,6 @@ export default function StaffPage() {
         </div>
 
 
-        {/* =================================================
-            ACTIVE TAB
-            ================================================= */}
-
         <section className="staff-tab-panel glass-card">
 
           <div className="staff-tab-panel-header">
@@ -2141,7 +2466,6 @@ export default function StaffPage() {
                   ].title
                 }
               </h2>
-
 
               <p>
                 {
@@ -2157,8 +2481,7 @@ export default function StaffPage() {
             <span className="staff-panel-count">
               {filteredActiveGroup.length}
               {" "}
-              {filteredActiveGroup.length
-              === 1
+              {filteredActiveGroup.length === 1
                 ? "ticket"
                 : "tickets"}
             </span>
@@ -2166,28 +2489,13 @@ export default function StaffPage() {
           </div>
 
 
-          {filteredActiveGroup.length
-          === 0
+          {filteredActiveGroup.length === 0
             ? (
               <div className="staff-tab-empty">
-
-                <div className="staff-tab-empty-icon">
-                  ✓
-                </div>
-
-
-                <h3>
-                  Nothing here
-                </h3>
-
-
-                <p>
-                  No matching tickets are
-                  currently in this workflow stage.
-                </p>
-
+                Nothing here.
               </div>
             )
+
             : (
               <div className="ticket-list">
 

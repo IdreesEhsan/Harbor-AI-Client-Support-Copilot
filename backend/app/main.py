@@ -6,9 +6,11 @@ from fastapi import (
     FastAPI,
     Request,
 )
+
 from fastapi.middleware.cors import (
     CORSMiddleware,
 )
+
 from fastapi.responses import (
     JSONResponse,
 )
@@ -16,6 +18,7 @@ from fastapi.responses import (
 from slowapi import (
     _rate_limit_exceeded_handler,
 )
+
 from slowapi.errors import (
     RateLimitExceeded,
 )
@@ -23,15 +26,27 @@ from slowapi.errors import (
 from app.api.agent import (
     router as agent_router,
 )
+
 from app.api.auth import (
     router as auth_router,
 )
+
+from app.api.conversations import (
+    router as conversations_router,
+)
+
 from app.api.health import (
     router as health_router,
 )
+
 from app.api.rag import (
     router as rag_router,
 )
+
+from app.api.realtime import (
+    router as realtime_router,
+)
+
 from app.api.tickets import (
     router as tickets_router,
 )
@@ -39,6 +54,7 @@ from app.api.tickets import (
 from app.core.config import (
     get_settings,
 )
+
 from app.core.rate_limit import (
     limiter,
 )
@@ -47,16 +63,13 @@ from app.core.rate_limit import (
 settings = get_settings()
 
 
-# ============================================================
-# Logging
-# ============================================================
-
 logging.basicConfig(
     level=getattr(
         logging,
         settings.log_level.upper(),
         logging.INFO,
     ),
+
     format=(
         "%(asctime)s | "
         "%(levelname)s | "
@@ -65,14 +78,11 @@ logging.basicConfig(
     ),
 )
 
+
 logger = logging.getLogger(
     "harbor.api"
 )
 
-
-# ============================================================
-# Application
-# ============================================================
 
 app = FastAPI(
     title=settings.app_name,
@@ -81,21 +91,16 @@ app = FastAPI(
 )
 
 
-# ============================================================
-# Rate limiter
-# ============================================================
+app.state.limiter = (
+    limiter
+)
 
-app.state.limiter = limiter
 
 app.add_exception_handler(
     RateLimitExceeded,
     _rate_limit_exceeded_handler,
 )
 
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -128,43 +133,43 @@ app.add_middleware(
 )
 
 
-# ============================================================
-# Request logging
-# ============================================================
-
 @app.middleware("http")
 async def request_logging_middleware(
     request: Request,
     call_next,
 ):
-    """
-    Add request IDs and production-safe request logging.
-
-    Harbor deliberately avoids logging request bodies,
-    authorization headers, JWTs, credentials, or raw PII.
-    """
-
     request_id = (
         request.headers.get(
             "X-Request-ID"
         )
-        or str(uuid4())
+        or str(
+            uuid4()
+        )
     )
+
 
     start_time = (
         time.perf_counter()
     )
 
+
     try:
-        response = await call_next(
-            request
+        response = (
+            await call_next(
+                request
+            )
         )
 
     except Exception:
+
         duration_ms = (
-            time.perf_counter()
-            - start_time
-        ) * 1000
+            (
+                time.perf_counter()
+                - start_time
+            )
+            * 1000
+        )
+
 
         logger.exception(
             (
@@ -180,12 +185,18 @@ async def request_logging_middleware(
             duration_ms,
         )
 
+
         raise
 
+
     duration_ms = (
-        time.perf_counter()
-        - start_time
-    ) * 1000
+        (
+            time.perf_counter()
+            - start_time
+        )
+        * 1000
+    )
+
 
     logger.info(
         (
@@ -203,34 +214,31 @@ async def request_logging_middleware(
         duration_ms,
     )
 
+
     response.headers[
         "X-Request-ID"
     ] = request_id
 
+
     return response
 
 
-# ============================================================
-# Global exception handler
-# ============================================================
-
-@app.exception_handler(Exception)
+@app.exception_handler(
+    Exception
+)
 async def global_exception_handler(
     request: Request,
     exc: Exception,
 ):
-    """
-    Return a safe API response for unexpected failures.
-
-    Internal stack traces remain in backend logs.
-    """
-
     request_id = (
         request.headers.get(
             "X-Request-ID"
         )
-        or str(uuid4())
+        or str(
+            uuid4()
+        )
     )
+
 
     logger.exception(
         (
@@ -244,67 +252,100 @@ async def global_exception_handler(
         request.url.path,
     )
 
+
     return JSONResponse(
         status_code=500,
+
         content={
-            "detail": (
-                "An unexpected server error "
-                "occurred."
-            ),
-            "request_id": request_id,
+            "detail":
+                "An unexpected server error occurred.",
+
+            "request_id":
+                request_id,
         },
+
         headers={
-            "X-Request-ID": request_id,
+            "X-Request-ID":
+                request_id,
         },
     )
 
 
-# ============================================================
-# Root endpoint
-# ============================================================
-
 @app.get("/")
 def root():
     return {
-        "name": settings.app_name,
-        "status": "running",
-        "environment": (
-            settings.app_env
-        ),
-        "version": "1.0.0",
+        "name":
+            settings.app_name,
+
+        "status":
+            "running",
+
+        "environment":
+            settings.app_env,
+
+        "version":
+            "1.0.0",
     }
 
-
-# ============================================================
-# Routers
-# ============================================================
 
 app.include_router(
     health_router,
     prefix=settings.api_prefix,
-    tags=["Health"],
+    tags=[
+        "Health",
+    ],
 )
+
 
 app.include_router(
     auth_router,
     prefix=settings.api_prefix,
-    tags=["Authentication"],
+    tags=[
+        "Authentication",
+    ],
 )
+
 
 app.include_router(
     rag_router,
     prefix=settings.api_prefix,
-    tags=["RAG"],
+    tags=[
+        "RAG",
+    ],
 )
+
 
 app.include_router(
     agent_router,
     prefix=settings.api_prefix,
-    tags=["Agent"],
+    tags=[
+        "Agent",
+    ],
 )
+
+
+app.include_router(
+    conversations_router,
+    prefix=settings.api_prefix,
+    tags=[
+        "Conversations",
+    ],
+)
+
+
+app.include_router(
+    realtime_router,
+    prefix=settings.api_prefix,
+    tags=[
+        "Realtime",
+    ],
+)
+
 
 app.include_router(
     tickets_router,
     prefix=settings.api_prefix,
-    tags=["Tickets"],
+    tags=[
+        "Tickets",
+    ],
 )

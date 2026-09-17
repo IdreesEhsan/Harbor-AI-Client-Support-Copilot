@@ -21,10 +21,6 @@ from app.tickets.schemas import (
 def get_customer_profile(
     user_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Return support-relevant profile fields for one user.
-    """
-
     if not isinstance(
         user_id,
         str,
@@ -71,12 +67,6 @@ def get_customer_profile(
 def get_customer_profiles(
     user_ids: list[str],
 ) -> dict[str, dict[str, Any]]:
-    """
-    Fetch multiple user profiles in one database query.
-
-    Returns a mapping keyed by user UUID.
-    """
-
     cleaned_ids = list(
         {
             str(user_id).strip()
@@ -132,11 +122,6 @@ def get_ticket_by_idempotency_key(
     idempotency_key: str,
     user_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Find an existing ticket using customer identity and
-    deterministic idempotency key.
-    """
-
     idempotency_key = (
         idempotency_key.strip()
     )
@@ -177,12 +162,6 @@ def get_ticket_by_idempotency_key(
 def create_ticket(
     ticket: TicketCreate,
 ) -> dict[str, Any]:
-    """
-    Persist Harbor's internal support ticket.
-
-    New tickets begin in pending approval.
-    """
-
     user_id = str(
         ticket.user_id
     )
@@ -252,12 +231,6 @@ def get_ticket(
     ticket_id: str,
     user_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Return one customer-owned ticket.
-
-    Ownership is enforced using ticket ID and user ID.
-    """
-
     client = get_supabase_client()
 
     response = (
@@ -286,10 +259,6 @@ def list_tickets(
     user_id: str,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """
-    Return tickets belonging to one authenticated customer.
-    """
-
     if limit <= 0:
         raise ValueError(
             "Ticket list limit must be greater than zero."
@@ -326,12 +295,6 @@ def list_tickets(
 def list_all_tickets(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """
-    Return tickets across all customers.
-
-    This method must remain behind staff RBAC.
-    """
-
     if limit <= 0:
         raise ValueError(
             "Ticket list limit must be greater than zero."
@@ -360,13 +323,6 @@ def list_all_tickets(
 def get_ticket_for_review(
     ticket_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Return one ticket for an authorized human reviewer.
-
-    This query intentionally does not scope to the ticket
-    owner's user ID.
-    """
-
     client = get_supabase_client()
 
     response = (
@@ -395,10 +351,6 @@ def approve_ticket(
     ticket_id: str,
     approved_by: str,
 ) -> dict[str, Any] | None:
-    """
-    Approve a pending support ticket.
-    """
-
     approved_at = (
         datetime.now(
             timezone.utc
@@ -453,10 +405,6 @@ def reject_ticket(
     ticket_id: str,
     rejected_by: str,
 ) -> dict[str, Any] | None:
-    """
-    Reject a pending support ticket.
-    """
-
     decided_at = (
         datetime.now(
             timezone.utc
@@ -514,11 +462,6 @@ def reject_ticket(
 def claim_ticket_for_execution(
     ticket_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Atomically claim an approved ticket before performing
-    an external operation.
-    """
-
     if not isinstance(
         ticket_id,
         str,
@@ -593,11 +536,6 @@ def recover_stale_execution_claim(
     ticket_id: str,
     previous_claim_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Replace a stale execution claim using a conditional
-    compare-and-swap style update.
-    """
-
     if not isinstance(
         ticket_id,
         str,
@@ -700,10 +638,6 @@ def mark_ticket_executed(
     monday_item_id: str,
     execution_claim_id: str,
 ) -> dict[str, Any] | None:
-    """
-    Persist successful Monday.com synchronization.
-    """
-
     if not isinstance(
         ticket_id,
         str,
@@ -834,12 +768,6 @@ def create_ticket_update(
     update_type: str,
     content: str,
 ) -> dict[str, Any]:
-    """
-    Persist one ticket conversation entry.
-
-    Authorization is performed in the service/API layer.
-    """
-
     client = get_supabase_client()
 
     response = (
@@ -877,12 +805,6 @@ def create_ticket_update(
 def list_customer_visible_ticket_updates(
     ticket_id: str,
 ) -> list[dict[str, Any]]:
-    """
-    Return only conversation entries customers may see.
-
-    Internal notes are excluded at query level.
-    """
-
     client = get_supabase_client()
 
     response = (
@@ -916,12 +838,6 @@ def list_customer_visible_ticket_updates(
 def list_all_ticket_updates(
     ticket_id: str,
 ) -> list[dict[str, Any]]:
-    """
-    Return the complete staff ticket timeline.
-
-    Includes internal notes.
-    """
-
     client = get_supabase_client()
 
     response = (
@@ -936,6 +852,88 @@ def list_all_ticket_updates(
             "created_at",
             desc=False,
         )
+        .execute()
+    )
+
+    return (
+        response.data
+        or []
+    )
+
+
+# ============================================================
+# NOTIFICATION UPDATE QUERY
+# ============================================================
+
+def list_notification_updates(
+    *,
+    ticket_ids: list[str],
+    update_type: str,
+    after: str,
+    until: str,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    Return new ticket updates inside one closed polling
+    window.
+
+    The calling service controls which tickets and update
+    type are authorized.
+
+    Customer notification calls use only:
+        staff_reply
+
+    Staff notification calls use only:
+        customer_reply
+    """
+
+    cleaned_ticket_ids = list(
+        {
+            str(ticket_id).strip()
+            for ticket_id
+            in ticket_ids
+            if str(ticket_id).strip()
+        }
+    )
+
+    if not cleaned_ticket_ids:
+        return []
+
+    if update_type not in {
+        "staff_reply",
+        "customer_reply",
+    }:
+        raise ValueError(
+            "Unsupported notification update type."
+        )
+
+    client = get_supabase_client()
+
+    response = (
+        client
+        .table("ticket_updates")
+        .select("*")
+        .in_(
+            "ticket_id",
+            cleaned_ticket_ids,
+        )
+        .eq(
+            "update_type",
+            update_type,
+        )
+        .gt(
+            "created_at",
+            after,
+        )
+        .lte(
+            "created_at",
+            until,
+        )
+        .order(
+            "created_at",
+            desc=False,
+        )
+        .limit(limit)
         .execute()
     )
 

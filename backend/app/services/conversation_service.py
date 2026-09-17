@@ -1,32 +1,62 @@
+import logging
+import threading
+from collections import defaultdict
 from typing import Any
 
-from app.guardrails.pipeline import run_input_guardrails
+from app.core.config import (
+    get_settings,
+)
+
+from app.guardrails.pipeline import (
+    run_input_guardrails,
+)
+
+from app.rag.generator import (
+    get_groq_client,
+)
+
 from app.repositories.conversations import (
     create_conversation,
+    get_all_messages,
     get_conversation,
     get_conversation_summary,
+    get_first_user_message,
+    get_messages_for_conversations,
     get_recent_messages,
+    list_conversations,
     save_message,
     touch_conversation,
+    update_conversation_title,
 )
 
 
-class ConversationNotFoundError(Exception):
+settings = get_settings()
+
+logger = logging.getLogger(
+    "harbor.conversations"
+)
+
+
+class ConversationNotFoundError(
+    Exception
+):
     """
-    Raised when a conversation does not exist or does not
-    belong to the authenticated user.
+    Conversation does not exist or does not belong to the
+    authenticated user.
     """
 
 
-class UnsafeMessagePersistenceError(Exception):
+class UnsafeMessagePersistenceError(
+    Exception
+):
     """
-    Raised when Harbor refuses to persist user content that
-    has been blocked by the input guardrail.
-
-    Raw blocked content must never be written into normal
-    conversation history.
+    Harbor refused to persist blocked customer content.
     """
 
+
+# ============================================================
+# CONVERSATION CREATION / OWNERSHIP
+# ============================================================
 
 def prepare_conversation(
     user_id: str,
@@ -35,9 +65,6 @@ def prepare_conversation(
     """
     Create a new conversation or validate ownership of an
     existing one.
-
-    Ownership validation is intentionally performed before
-    any messages are written to the conversation.
     """
 
     if not conversation_id:
@@ -45,9 +72,13 @@ def prepare_conversation(
             user_id=user_id,
         )
 
-    conversation = get_conversation(
-        conversation_id=conversation_id,
-        user_id=user_id,
+    conversation = (
+        get_conversation(
+            conversation_id=(
+                conversation_id
+            ),
+            user_id=user_id,
+        )
     )
 
     if conversation is None:
@@ -58,34 +89,23 @@ def prepare_conversation(
     return conversation
 
 
+# ============================================================
+# SAFE USER MESSAGE PERSISTENCE
+# ============================================================
+
 def prepare_user_message_for_persistence(
     message: str,
 ) -> str | None:
     """
-    Apply Harbor's input guardrails before a user message is
-    written to persistent conversation history.
+    Run the input guardrail before persistent storage.
 
-    Persistence policy:
-
-    - allow:
-      Store the original message.
-
-    - redact:
-      Store only the sanitized version.
-
-    - block:
-      Do not store the user message.
-
-    - escalate:
-      Store sanitized content when available, otherwise the
-      original content. This allows legitimate support issues
-      requiring human review to remain available.
-
-    Returning None means the message must not be persisted.
+    Raw blocked content is never stored in normal history.
     """
 
-    result = run_input_guardrails(
-        message
+    result = (
+        run_input_guardrails(
+            message
+        )
     )
 
     if result.status == "allow":
@@ -103,9 +123,6 @@ def prepare_user_message_for_persistence(
             or message
         )
 
-    # GuardrailStatus is currently constrained by Pydantic,
-    # but failing closed here protects this boundary if the
-    # contract changes later.
     return None
 
 
@@ -114,11 +131,7 @@ def save_user_message(
     message: str,
 ) -> dict[str, Any] | None:
     """
-    Safely persist an authenticated user's message.
-
-    Raw input is never written directly to conversation
-    history. Harbor evaluates it first so PII/credentials can
-    be sanitized and blocked content can be discarded.
+    Safely persist a customer message.
     """
 
     safe_message = (
@@ -131,85 +144,489 @@ def save_user_message(
         return None
 
     return save_message(
-        conversation_id=conversation_id,
+        conversation_id=(
+            conversation_id
+        ),
         role="user",
         content=safe_message,
+        metadata={},
     )
 
+
+# ============================================================
+# ASSISTANT MESSAGE PERSISTENCE
+# ============================================================
 
 def save_assistant_message(
     conversation_id: str,
     message: str,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Persist Harbor's final response in conversation history.
-
-    Assistant output guardrails will be added separately in
-    Phase 9 before this becomes the final output boundary.
+    Persist the final Harbor answer plus metadata needed to
+    rebuild the UI later.
     """
 
     return save_message(
-        conversation_id=conversation_id,
+        conversation_id=(
+            conversation_id
+        ),
         role="assistant",
         content=message,
+        metadata=(
+            metadata or {}
+        ),
     )
 
+
+# ============================================================
+# TITLE GENERATION
+# ============================================================
+
+def generate_conversation_title(
+    first_message: str,
+) -> str:
+    """
+    Generate a real semantic summary title from the first
+    customer message.
+
+    Expected output:
+        Duplicate Charge Refund
+        Account Login Problem
+        Subscription Refund Policy
+
+    The title is intentionally short so it fits naturally in
+    the left sidebar.
+    """
+
+    first_message = (
+        first_message.strip()
+    )
+
+    if not first_message:
+        return "Support Request"
+
+    system_prompt = """
+You create short titles for customer-support conversations.
+
+Summarize the main topic or problem from the customer's first message.
+
+Rules:
+- Use 3 to 6 words.
+- Summarize the meaning, not the exact wording.
+- Do not copy the entire customer message.
+- Do not use quotation marks.
+- Do not end with punctuation.
+- Do not use the words Customer, User, Harbor, Chat, or Conversation.
+- Return only the title.
+
+Examples:
+
+"I was charged twice and need one payment refunded."
+Duplicate Charge Refund
+
+"I cannot log into my account after resetting my password."
+Account Login Problem
+
+"What is your refund policy for cancelled subscriptions?"
+Subscription Refund Policy
+""".strip()
+
+    client = (
+        get_groq_client()
+    )
+
+    response = (
+        client
+        .chat
+        .completions
+        .create(
+            model=(
+                settings.groq_model
+            ),
+            messages=[
+                {
+                    "role":
+                        "system",
+
+                    "content":
+                        system_prompt,
+                },
+                {
+                    "role":
+                        "user",
+
+                    "content":
+                        first_message,
+                },
+            ],
+            temperature=0.0,
+        )
+    )
+
+    title = (
+        response
+        .choices[0]
+        .message
+        .content
+        or ""
+    ).strip()
+
+    title = (
+        title
+        .strip("\"' ")
+        .rstrip(".!?")
+        .strip()
+    )
+
+    if not title:
+        return "Support Request"
+
+    words = title.split()
+
+    if len(words) > 6:
+        title = " ".join(
+            words[:6]
+        )
+
+    if len(title) > 80:
+        title = (
+            title[:77]
+            .rstrip()
+            + "..."
+        )
+
+    return title
+
+
+def ensure_conversation_title(
+    conversation_id: str,
+) -> None:
+    """
+    Generate a title only if the conversation does not
+    already have one.
+
+    Failures are intentionally isolated from the active
+    support conversation.
+    """
+
+    try:
+        first_message = (
+            get_first_user_message(
+                conversation_id
+            )
+        )
+
+        if not first_message:
+            return
+
+        content = str(
+            first_message.get(
+                "content",
+                "",
+            )
+        ).strip()
+
+        if not content:
+            return
+
+        title = (
+            generate_conversation_title(
+                content
+            )
+        )
+
+        update_conversation_title(
+            conversation_id=(
+                conversation_id
+            ),
+            title=title,
+        )
+
+    except Exception:
+        logger.exception(
+            (
+                "Unable to generate conversation title | "
+                "conversation_id=%s"
+            ),
+            conversation_id,
+        )
+
+
+def generate_title_in_background(
+    conversation_id: str,
+) -> None:
+    """
+    Generate the sidebar title outside the main AI response
+    flow.
+
+    This prevents title generation from increasing the time
+    before Harbor's response is returned.
+    """
+
+    worker = threading.Thread(
+        target=(
+            ensure_conversation_title
+        ),
+        args=(
+            conversation_id,
+        ),
+        daemon=True,
+    )
+
+    worker.start()
+
+
+# ============================================================
+# RECENT MEMORY
+# ============================================================
 
 def load_recent_history(
     conversation_id: str,
     limit: int = 8,
 ) -> list[dict[str, Any]]:
-    """
-    Load Harbor's short-term conversation buffer.
-
-    Only recent messages are returned so the LLM does not
-    receive the complete conversation on every request.
-    """
-
     return get_recent_messages(
-        conversation_id=conversation_id,
+        conversation_id=(
+            conversation_id
+        ),
         limit=limit,
     )
 
 
-def finalize_conversation_turn(
-    conversation_id: str,
-    assistant_message: str,
-) -> None:
-    """
-    Store Harbor's response and mark the conversation as
-    recently active.
-    """
-
-    save_assistant_message(
-        conversation_id=conversation_id,
-        message=assistant_message,
-    )
-
-    touch_conversation(
-        conversation_id=conversation_id,
-    )
-
+# ============================================================
+# SUMMARY MEMORY
+# ============================================================
 
 def load_conversation_summary(
     conversation_id: str,
 ) -> str | None:
-    """
-    Load Harbor's persisted long-term conversation summary.
-    """
-
-    record = get_conversation_summary(
-        conversation_id
+    record = (
+        get_conversation_summary(
+            conversation_id
+        )
     )
 
     if not record:
         return None
 
-    summary = record.get(
-        "summary"
+    summary = (
+        record.get(
+            "summary"
+        )
     )
 
     if not summary:
         return None
 
-    return str(summary).strip() or None
+    return (
+        str(summary).strip()
+        or None
+    )
+
+
+# ============================================================
+# FINALIZE TURN
+# ============================================================
+
+def finalize_conversation_turn(
+    conversation_id: str,
+    assistant_message: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """
+    Persist the final assistant response and make the
+    conversation recently active.
+    """
+
+    save_assistant_message(
+        conversation_id=(
+            conversation_id
+        ),
+        message=(
+            assistant_message
+        ),
+        metadata=(
+            metadata or {}
+        ),
+    )
+
+    touch_conversation(
+        conversation_id=(
+            conversation_id
+        )
+    )
+
+    generate_title_in_background(
+        conversation_id
+    )
+
+
+# ============================================================
+# SIDEBAR LIST
+# ============================================================
+
+def list_user_conversations(
+    *,
+    user_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """
+    Return the data required by the ChatGPT-style sidebar.
+
+    Only two database requests are used:
+
+        conversations
+        messages for those conversations
+
+    This avoids issuing separate first-message and
+    latest-message queries for every conversation.
+    """
+
+    conversations = (
+        list_conversations(
+            user_id=user_id,
+            limit=limit,
+        )
+    )
+
+    if not conversations:
+        return []
+
+    conversation_ids = [
+        str(
+            conversation["id"]
+        )
+        for conversation
+        in conversations
+    ]
+
+    messages = (
+        get_messages_for_conversations(
+            conversation_ids
+        )
+    )
+
+    grouped_messages: dict[
+        str,
+        list[dict[str, Any]],
+    ] = defaultdict(list)
+
+    for message in messages:
+        conversation_key = str(
+            message.get(
+                "conversation_id"
+            )
+        )
+
+        grouped_messages[
+            conversation_key
+        ].append(
+            message
+        )
+
+    result = []
+
+    for conversation in conversations:
+        record = dict(
+            conversation
+        )
+
+        conversation_id = str(
+            record["id"]
+        )
+
+        conversation_messages = (
+            grouped_messages.get(
+                conversation_id,
+                [],
+            )
+        )
+
+        title = (
+            record.get(
+                "title"
+            )
+        )
+
+        if not title:
+            title = (
+                "New Support Conversation"
+            )
+
+        record[
+            "title"
+        ] = title
+
+        preview = ""
+
+        if conversation_messages:
+            latest_message = (
+                conversation_messages[-1]
+            )
+
+            preview = str(
+                latest_message.get(
+                    "content",
+                    "",
+                )
+            ).strip()
+
+        if len(preview) > 100:
+            preview = (
+                preview[:97]
+                .rstrip()
+                + "..."
+            )
+
+        record[
+            "preview"
+        ] = preview
+
+        result.append(
+            record
+        )
+
+    return result
+
+
+# ============================================================
+# OPEN OLD CONVERSATION
+# ============================================================
+
+def get_user_conversation_history(
+    *,
+    user_id: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """
+    Return one owned conversation plus complete persisted
+    message metadata.
+    """
+
+    conversation = (
+        get_conversation(
+            conversation_id=(
+                conversation_id
+            ),
+            user_id=user_id,
+        )
+    )
+
+    if conversation is None:
+        raise ConversationNotFoundError(
+            "Conversation was not found."
+        )
+
+    messages = (
+        get_all_messages(
+            conversation_id
+        )
+    )
+
+    return {
+        "conversation":
+            conversation,
+
+        "messages":
+            messages,
+    }

@@ -11,6 +11,11 @@ import {
 } from "../api/agent";
 
 import {
+  getConversation,
+  getConversations,
+} from "../api/conversations";
+
+import {
   getMyCaseUpdates,
   getMyCases,
   replyToMyCase,
@@ -19,6 +24,13 @@ import {
 import {
   useAuth,
 } from "../context/AuthContext";
+
+import {
+  connectNotificationSocket,
+} from "../realtime/notifications";
+
+import "../styles/conversation-sidebar.css";
+import "../styles/notifications.css";
 
 
 export default function ChatPage() {
@@ -37,7 +49,6 @@ export default function ChatPage() {
     setActiveView,
   ] = useState("chat");
 
-
   const [
     activeCaseTab,
     setActiveCaseTab,
@@ -45,7 +56,7 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     CHAT STATE
+     AI CHAT
      ======================================================= */
 
   const [
@@ -73,13 +84,47 @@ export default function ChatPage() {
     setError,
   ] = useState("");
 
+  const [
+    openingConversationId,
+    setOpeningConversationId,
+  ] = useState(null);
 
   const messagesEndRef =
     useRef(null);
 
 
   /* =======================================================
-     MY CASES STATE
+     AI CONVERSATION SIDEBAR
+     ======================================================= */
+
+  const [
+    conversations,
+    setConversations,
+  ] = useState([]);
+
+  const [
+    historyLoading,
+    setHistoryLoading,
+  ] = useState(true);
+
+  const [
+    historyRefreshing,
+    setHistoryRefreshing,
+  ] = useState(false);
+
+  const [
+    historyError,
+    setHistoryError,
+  ] = useState("");
+
+  const [
+    conversationSearch,
+    setConversationSearch,
+  ] = useState("");
+
+
+  /* =======================================================
+     MY CASES
      ======================================================= */
 
   const [
@@ -144,26 +189,29 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     AUTO SCROLL
+     REALTIME NOTIFICATIONS
      ======================================================= */
 
-  useEffect(() => {
-    if (
-      activeView
-      === "chat"
-    ) {
-      messagesEndRef
-        .current
-        ?.scrollIntoView({
-          behavior:
-            "smooth",
-        });
-    }
-  }, [
-    messages,
-    sending,
-    activeView,
-  ]);
+  const [
+    messageNotifications,
+    setMessageNotifications,
+  ] = useState([]);
+
+  const [
+    notificationMenuOpen,
+    setNotificationMenuOpen,
+  ] = useState(false);
+
+  const [
+    unreadByCase,
+    setUnreadByCase,
+  ] = useState({});
+
+  const expandedCaseIdRef =
+    useRef(null);
+
+  const notificationMenuRef =
+    useRef(null);
 
 
   /* =======================================================
@@ -176,9 +224,7 @@ export default function ChatPage() {
       !== "undefined"
       && crypto.randomUUID
     ) {
-      return (
-        crypto.randomUUID()
-      );
+      return crypto.randomUUID();
     }
 
     return (
@@ -229,26 +275,118 @@ export default function ChatPage() {
       return "Unknown";
     }
 
-    return (
-      date.toLocaleString(
-        undefined,
-        {
-          month:
-            "short",
+    return date.toLocaleString(
+      undefined,
+      {
+        month:
+          "short",
 
-          day:
-            "numeric",
+        day:
+          "numeric",
 
-          year:
-            "numeric",
+        year:
+          "numeric",
 
-          hour:
-            "numeric",
+        hour:
+          "numeric",
 
-          minute:
-            "2-digit",
-        }
+        minute:
+          "2-digit",
+      }
+    );
+  };
+
+
+  const formatRelativeTime = (
+    value
+  ) => {
+    if (!value) {
+      return "";
+    }
+
+    const date =
+      new Date(
+        value
+      );
+
+    if (
+      Number.isNaN(
+        date.getTime()
       )
+    ) {
+      return "";
+    }
+
+    const difference =
+      Date.now()
+      - date.getTime();
+
+    const minute =
+      60 * 1000;
+
+    const hour =
+      60 * minute;
+
+    const day =
+      24 * hour;
+
+
+    if (
+      difference
+      < minute
+    ) {
+      return "Now";
+    }
+
+
+    if (
+      difference
+      < hour
+    ) {
+      return (
+        `${Math.floor(
+          difference
+          / minute
+        )}m`
+      );
+    }
+
+
+    if (
+      difference
+      < day
+    ) {
+      return (
+        `${Math.floor(
+          difference
+          / hour
+        )}h`
+      );
+    }
+
+
+    if (
+      difference
+      < day * 7
+    ) {
+      return (
+        `${Math.floor(
+          difference
+          / day
+        )}d`
+      );
+    }
+
+
+    return date.toLocaleDateString(
+      undefined,
+      {
+        month:
+          "short",
+
+        day:
+          "numeric",
+      }
     );
   };
 
@@ -262,6 +400,7 @@ export default function ChatPage() {
         || ""
       ).toLowerCase();
 
+
     if (
       value === "critical"
       || value === "high"
@@ -271,6 +410,7 @@ export default function ChatPage() {
       );
     }
 
+
     if (
       value === "medium"
     ) {
@@ -278,6 +418,7 @@ export default function ChatPage() {
         "badge badge-warning"
       );
     }
+
 
     return (
       "badge badge-success"
@@ -289,29 +430,579 @@ export default function ChatPage() {
     status
   ) => {
     if (
-      status === "open"
-      || status === "in_progress"
-      || status === "resolved"
-      || status === "closed"
+      [
+        "open",
+        "in_progress",
+        "resolved",
+        "closed",
+      ].includes(
+        status
+      )
     ) {
       return (
         "badge badge-success"
       );
     }
 
+
     if (
-      status === "rejected"
-      || status === "failed"
+      [
+        "rejected",
+        "failed",
+      ].includes(
+        status
+      )
     ) {
       return (
         "badge badge-danger"
       );
     }
 
+
     return (
       "badge badge-warning"
     );
   };
+
+
+  /* =======================================================
+     KEEP EXPANDED CASE REF CURRENT
+     ======================================================= */
+
+  useEffect(() => {
+    expandedCaseIdRef.current =
+      expandedCaseId;
+  }, [
+    expandedCaseId,
+  ]);
+
+
+  /* =======================================================
+     CLOSE NOTIFICATION DROPDOWN ON OUTSIDE CLICK
+     ======================================================= */
+
+  useEffect(() => {
+    const handleOutsideClick =
+      (
+        event
+      ) => {
+        if (
+          notificationMenuRef.current
+          && !notificationMenuRef
+            .current
+            .contains(
+              event.target
+            )
+        ) {
+          setNotificationMenuOpen(
+            false
+          );
+        }
+      };
+
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick
+    );
+
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick
+      );
+    };
+  }, []);
+
+
+  /* =======================================================
+     REALTIME CUSTOMER WEBSOCKET
+     ======================================================= */
+
+  useEffect(() => {
+    if (
+      !user
+      || user.role !== "customer"
+    ) {
+      return undefined;
+    }
+
+
+    const disconnect =
+      connectNotificationSocket({
+        onMessage:
+          (
+            notification
+          ) => {
+            if (
+              notification?.type
+              !== "ticket_message"
+              || notification?.recipient
+              !== "customer"
+              || notification?.update_type
+              !== "staff_reply"
+            ) {
+              return;
+            }
+
+
+            const ticketId =
+              notification.ticket_id;
+
+
+            if (!ticketId) {
+              return;
+            }
+
+
+            /* ---------------------------------------------
+               ADD TO NOTIFICATION DROPDOWN
+               --------------------------------------------- */
+
+            setMessageNotifications(
+              (current) => {
+                const alreadyExists =
+                  current.some(
+                    (item) =>
+                      item.id
+                      === notification.id
+                  );
+
+
+                if (alreadyExists) {
+                  return current;
+                }
+
+
+                return [
+                  notification,
+                  ...current,
+                ].slice(
+                  0,
+                  30
+                );
+              }
+            );
+
+
+            /* ---------------------------------------------
+               IF CASE IS ALREADY OPEN
+               --------------------------------------------- */
+
+            if (
+              expandedCaseIdRef.current
+              === ticketId
+            ) {
+              setCaseUpdates(
+                (current) => {
+                  const alreadyExists =
+                    current.some(
+                      (update) =>
+                        update.id
+                        === notification.id
+                    );
+
+
+                  if (alreadyExists) {
+                    return current;
+                  }
+
+
+                  return [
+                    ...current,
+                    notification,
+                  ];
+                }
+              );
+
+
+              return;
+            }
+
+
+            /* ---------------------------------------------
+               OTHERWISE ADD UNREAD COUNT
+               --------------------------------------------- */
+
+            setUnreadByCase(
+              (current) => ({
+                ...current,
+
+                [ticketId]:
+                  (
+                    current[
+                      ticketId
+                    ]
+                    || 0
+                  )
+                  + 1,
+              })
+            );
+
+
+            /*
+             * Case information may have changed.
+             * Reload only when My Cases is next opened.
+             */
+            setCasesLoaded(
+              false
+            );
+          },
+
+
+        onReady:
+          () => {
+            console.log(
+              "Harbor customer realtime ready."
+            );
+          },
+
+
+        onError:
+          (
+            event
+          ) => {
+            console.error(
+              "Harbor customer realtime error:",
+              event
+            );
+          },
+      });
+
+
+    return disconnect;
+
+  }, [
+    user,
+  ]);
+
+
+  /* =======================================================
+     AI AUTO SCROLL
+     ======================================================= */
+
+  useEffect(() => {
+    if (
+      activeView !== "chat"
+    ) {
+      return;
+    }
+
+
+    messagesEndRef
+      .current
+      ?.scrollIntoView({
+        behavior:
+          "smooth",
+      });
+
+  }, [
+    messages,
+    sending,
+    activeView,
+  ]);
+
+
+  /* =======================================================
+     LOAD AI CONVERSATION HISTORY
+     ======================================================= */
+
+  const loadConversationHistory =
+    useCallback(
+      async (
+        refresh = false
+      ) => {
+        setHistoryError("");
+
+
+        if (refresh) {
+          setHistoryRefreshing(
+            true
+          );
+        } else {
+          setHistoryLoading(
+            true
+          );
+        }
+
+
+        try {
+          const data =
+            await getConversations();
+
+
+          setConversations(
+            Array.isArray(
+              data
+            )
+              ? data
+              : []
+          );
+
+        } catch (err) {
+          console.error(
+            "Unable to load conversation history:",
+            err
+          );
+
+
+          setHistoryError(
+            err.response
+              ?.data
+              ?.detail
+            || (
+              "Unable to load "
+              + "conversation history."
+            )
+          );
+
+        } finally {
+          setHistoryLoading(
+            false
+          );
+
+          setHistoryRefreshing(
+            false
+          );
+        }
+      },
+      []
+    );
+
+
+  useEffect(() => {
+    loadConversationHistory();
+  }, [
+    loadConversationHistory,
+  ]);
+
+
+  /* =======================================================
+     FILTER SIDEBAR CONVERSATIONS
+     ======================================================= */
+
+  const filteredConversations =
+    useMemo(
+      () => {
+        const query =
+          conversationSearch
+            .trim()
+            .toLowerCase();
+
+
+        if (!query) {
+          return conversations;
+        }
+
+
+        return conversations.filter(
+          (conversation) => {
+            const title =
+              String(
+                conversation.title
+                || ""
+              ).toLowerCase();
+
+            const preview =
+              String(
+                conversation.preview
+                || ""
+              ).toLowerCase();
+
+
+            return (
+              title.includes(
+                query
+              )
+              || preview.includes(
+                query
+              )
+            );
+          }
+        );
+      },
+      [
+        conversations,
+        conversationSearch,
+      ]
+    );
+
+
+  const recentConversation =
+    conversations.length > 0
+      ? conversations[0]
+      : null;
+
+
+  /* =======================================================
+     OPEN EXISTING AI CONVERSATION
+     ======================================================= */
+
+  const openConversation =
+    async (
+      selectedConversationId
+    ) => {
+      if (
+        selectedConversationId
+        === conversationId
+      ) {
+        setActiveView(
+          "chat"
+        );
+
+        return;
+      }
+
+
+      if (
+        sending
+        || openingConversationId
+      ) {
+        return;
+      }
+
+
+      setOpeningConversationId(
+        selectedConversationId
+      );
+
+      setError("");
+
+      setActiveView(
+        "chat"
+      );
+
+
+      try {
+        const data =
+          await getConversation(
+            selectedConversationId
+          );
+
+
+        const loadedMessages =
+          (
+            data.messages
+            || []
+          )
+            .filter(
+              (message) =>
+                message.role === "user"
+                || message.role === "assistant"
+            )
+            .map(
+              (message) => {
+                const metadata =
+                  message.metadata
+                  || {};
+
+
+                return {
+                  id:
+                    message.id
+                    || createLocalId(),
+
+                  role:
+                    message.role,
+
+                  content:
+                    message.content,
+
+                  streaming:
+                    false,
+
+                  action:
+                    metadata.action
+                    ?? null,
+
+                  severity:
+                    metadata.severity
+                    ?? null,
+
+                  citations:
+                    metadata.citations
+                    ?? [],
+
+                  escalationRequired:
+                    metadata
+                      .escalation_required
+                    ?? false,
+
+                  ticketId:
+                    metadata.ticket_id
+                    ?? null,
+
+                  ticketStatus:
+                    metadata.ticket_status
+                    ?? null,
+
+                  approvalStatus:
+                    metadata.approval_status
+                    ?? null,
+                };
+              }
+            );
+
+
+        setMessages(
+          loadedMessages
+        );
+
+        setConversationId(
+          selectedConversationId
+        );
+
+        setInput("");
+
+      } catch (err) {
+        console.error(
+          "Unable to open conversation:",
+          err
+        );
+
+
+        setError(
+          err.response
+            ?.data
+            ?.detail
+          || (
+            "Unable to open "
+            + "this conversation."
+          )
+        );
+
+      } finally {
+        setOpeningConversationId(
+          null
+        );
+      }
+    };
+
+
+  /* =======================================================
+     NEW CHAT
+     ======================================================= */
+
+  const startNewConversation =
+    () => {
+      if (sending) {
+        return;
+      }
+
+
+      setConversationId("");
+
+      setMessages([]);
+
+      setInput("");
+
+      setError("");
+
+      setActiveView(
+        "chat"
+      );
+    };
 
 
   /* =======================================================
@@ -331,35 +1022,41 @@ export default function ChatPage() {
         approved:
           cases.filter(
             (ticket) =>
-              ticket.status
-              === "approved"
-              || ticket.status
-              === "executing"
+              [
+                "approved",
+                "executing",
+              ].includes(
+                ticket.status
+              )
           ),
 
         successful:
           cases.filter(
             (ticket) =>
-              ticket.status
-              === "open"
-              || ticket.status
-              === "in_progress"
-              || ticket.status
-              === "resolved"
-              || ticket.status
-              === "closed"
+              [
+                "open",
+                "in_progress",
+                "resolved",
+                "closed",
+              ].includes(
+                ticket.status
+              )
           ),
 
         rejected:
           cases.filter(
             (ticket) =>
-              ticket.status
-              === "rejected"
-              || ticket.status
-              === "failed"
+              [
+                "rejected",
+                "failed",
+              ].includes(
+                ticket.status
+              )
           ),
       }),
-      [cases]
+      [
+        cases,
+      ]
     );
 
 
@@ -375,7 +1072,10 @@ export default function ChatPage() {
         "Pending Review",
 
       description:
-        "Support requests waiting for a Harbor support agent to review.",
+        (
+          "Support requests waiting for "
+          + "a Harbor support agent to review."
+        ),
     },
 
     approved: {
@@ -383,7 +1083,10 @@ export default function ChatPage() {
         "Approved",
 
       description:
-        "Support requests approved and waiting for processing.",
+        (
+          "Support requests approved "
+          + "and waiting for processing."
+        ),
     },
 
     successful: {
@@ -391,7 +1094,10 @@ export default function ChatPage() {
         "Successful / Processed",
 
       description:
-        "Support requests successfully processed or currently progressing.",
+        (
+          "Support requests successfully "
+          + "processed or currently progressing."
+        ),
     },
 
     rejected: {
@@ -399,7 +1105,10 @@ export default function ChatPage() {
         "Rejected / Failed",
 
       description:
-        "Support requests that were rejected or could not be completed.",
+        (
+          "Support requests that were rejected "
+          + "or could not be completed."
+        ),
     },
   };
 
@@ -414,6 +1123,7 @@ export default function ChatPage() {
         refresh = false
       ) => {
         setCasesError("");
+
 
         if (refresh) {
           setCasesRefreshing(
@@ -452,7 +1162,9 @@ export default function ChatPage() {
 
 
           setCasesError(
-            err.response?.data?.detail
+            err.response
+              ?.data
+              ?.detail
             || (
               "Unable to load "
               + "your support cases."
@@ -479,6 +1191,7 @@ export default function ChatPage() {
         "cases"
       );
 
+
       if (!casesLoaded) {
         await loadCases();
       }
@@ -486,7 +1199,7 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     CASE CONVERSATION
+     CASE UPDATES
      ======================================================= */
 
   const loadCaseUpdates =
@@ -525,7 +1238,9 @@ export default function ChatPage() {
 
 
         setCaseConversationError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || (
             "Unable to load "
             + "case conversation."
@@ -540,10 +1255,38 @@ export default function ChatPage() {
     };
 
 
+  /* =======================================================
+     MARK CASE READ
+     ======================================================= */
+
+  const markCaseRead =
+    (
+      ticketId
+    ) => {
+      setUnreadByCase(
+        (current) => ({
+          ...current,
+
+          [ticketId]:
+            0,
+        })
+      );
+    };
+
+
+  /* =======================================================
+     TOGGLE CASE CONVERSATION
+     ======================================================= */
+
   const toggleCaseConversation =
     async (
       ticketId
     ) => {
+      markCaseRead(
+        ticketId
+      );
+
+
       if (
         expandedCaseId
         === ticketId
@@ -553,7 +1296,9 @@ export default function ChatPage() {
         );
 
         setCaseUpdates([]);
+
         setCaseReply("");
+
         setCaseConversationError("");
 
         return;
@@ -565,6 +1310,7 @@ export default function ChatPage() {
       );
 
       setCaseReply("");
+
       setCaseConversationError("");
 
 
@@ -575,7 +1321,7 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     IMMEDIATE CUSTOMER REPLY
+     CUSTOMER REPLY
      ======================================================= */
 
   const submitCaseReply =
@@ -615,11 +1361,6 @@ export default function ChatPage() {
           );
 
 
-        // --------------------------------------------------
-        // Append the server-created update immediately.
-        // No second GET is required before showing it.
-        // --------------------------------------------------
-
         setCaseUpdates(
           (current) => [
             ...current,
@@ -630,7 +1371,6 @@ export default function ChatPage() {
 
         setCaseReply("");
 
-
       } catch (err) {
         console.error(
           "Unable to send customer reply:",
@@ -639,7 +1379,9 @@ export default function ChatPage() {
 
 
         setCaseConversationError(
-          err.response?.data?.detail
+          err.response
+            ?.data
+            ?.detail
           || (
             "Unable to send "
             + "your reply."
@@ -655,7 +1397,132 @@ export default function ChatPage() {
 
 
   /* =======================================================
-     STREAMING AI CHAT
+     NOTIFICATION HELPERS
+     ======================================================= */
+
+  const getCaseTabForStatus =
+    (
+      status
+    ) => {
+      if (
+        status
+        === "pending_approval"
+      ) {
+        return "pending";
+      }
+
+
+      if (
+        [
+          "approved",
+          "executing",
+        ].includes(
+          status
+        )
+      ) {
+        return "approved";
+      }
+
+
+      if (
+        [
+          "rejected",
+          "failed",
+        ].includes(
+          status
+        )
+      ) {
+        return "rejected";
+      }
+
+
+      return "successful";
+    };
+
+
+  const openCaseFromNotification =
+    async (
+      notification
+    ) => {
+      const ticketId =
+        notification.ticket_id;
+
+
+      if (!ticketId) {
+        return;
+      }
+
+
+      setNotificationMenuOpen(
+        false
+      );
+
+
+      markCaseRead(
+        ticketId
+      );
+
+
+      setActiveView(
+        "cases"
+      );
+
+
+      setActiveCaseTab(
+        getCaseTabForStatus(
+          notification.ticket
+            ?.status
+        )
+      );
+
+
+      setExpandedCaseId(
+        ticketId
+      );
+
+
+      setCaseReply("");
+
+      setCaseConversationError("");
+
+
+      await Promise.all([
+        loadCases(
+          true
+        ),
+
+        loadCaseUpdates(
+          ticketId
+        ),
+      ]);
+    };
+
+
+  const totalUnreadNotifications =
+    useMemo(
+      () =>
+        Object.values(
+          unreadByCase
+        ).reduce(
+          (
+            total,
+            count
+          ) =>
+            total
+            + Number(
+              count
+              || 0
+            ),
+          0
+        ),
+      [
+        unreadByCase,
+      ]
+    );
+
+
+  /* =======================================================
+     SEND AI MESSAGE
      ======================================================= */
 
   const sendMessage =
@@ -720,13 +1587,13 @@ export default function ChatPage() {
 
 
       setInput("");
+
       setSending(
         true
       );
 
 
       try {
-
         const data =
           await streamAgentChat({
             message:
@@ -736,15 +1603,14 @@ export default function ChatPage() {
               conversationId
               || null,
 
-
             onToken:
-              (token) => {
-
+              (
+                token
+              ) => {
                 setMessages(
                   (current) =>
                     current.map(
                       (message) => {
-
                         if (
                           message.id
                           !== assistantId
@@ -770,22 +1636,10 @@ export default function ChatPage() {
           });
 
 
-        // --------------------------------------------------
-        // Final AgentResponse is canonical.
-        //
-        // The backend has now completed:
-        // - output guardrail
-        // - citations
-        // - severity
-        // - escalation state
-        // - ticket confirmation / creation
-        // --------------------------------------------------
-
         setMessages(
           (current) =>
             current.map(
               (message) => {
-
                 if (
                   message.id
                   !== assistantId
@@ -814,7 +1668,8 @@ export default function ChatPage() {
                     ?? [],
 
                   escalationRequired:
-                    data.escalation_required
+                    data
+                      .escalation_required
                     ?? false,
 
                   ticketId:
@@ -843,6 +1698,25 @@ export default function ChatPage() {
         }
 
 
+        await loadConversationHistory(
+          true
+        );
+
+
+        /*
+         * Title generation may run asynchronously.
+         * Refresh once again shortly afterward.
+         */
+        window.setTimeout(
+          () => {
+            loadConversationHistory(
+              true
+            );
+          },
+          1200
+        );
+
+
         if (
           data.ticket_id
         ) {
@@ -854,7 +1728,6 @@ export default function ChatPage() {
             "pending"
           );
         }
-
 
       } catch (err) {
         console.error(
@@ -881,7 +1754,6 @@ export default function ChatPage() {
           )
         );
 
-
       } finally {
         setSending(
           false
@@ -890,415 +1762,470 @@ export default function ChatPage() {
     };
 
 
-  const handleKeyDown = (
-    event
-  ) => {
-    if (
-      event.key
-      === "Enter"
-      && !event.shiftKey
-    ) {
-      event.preventDefault();
+  /* =======================================================
+     ENTER TO SEND
+     ======================================================= */
 
-
+  const handleKeyDown =
+    (
+      event
+    ) => {
       if (
-        input.trim()
-        && !sending
+        event.key
+        === "Enter"
+        && !event.shiftKey
       ) {
-        event
-          .currentTarget
-          .form
-          ?.requestSubmit();
+        event.preventDefault();
+
+
+        if (
+          input.trim()
+          && !sending
+        ) {
+          event
+            .currentTarget
+            .form
+            ?.requestSubmit();
+        }
       }
-    }
-  };
+    };
+
+
+  /* =======================================================
+     QUICK PROMPT
+     ======================================================= */
+
+  const useQuickPrompt =
+    (
+      prompt
+    ) => {
+      setInput(
+        prompt
+      );
+    };
 
 
   /* =======================================================
      CASE CARD
      ======================================================= */
 
-  const renderCaseCard = (
-    ticket
-  ) => {
-    const conversationOpen =
-      expandedCaseId
-      === ticket.id;
+  const renderCaseCard =
+    (
+      ticket
+    ) => {
+      const conversationOpen =
+        expandedCaseId
+        === ticket.id;
 
-
-    return (
-      <article
-        key={
+      const unreadCount =
+        unreadByCase[
           ticket.id
-        }
-        className="customer-case-card"
-      >
+        ]
+        || 0;
 
-        <div className="customer-case-top">
 
-          <div className="customer-case-title">
+      return (
+        <article
+          key={
+            ticket.id
+          }
+          className="customer-case-card"
+        >
 
-            <div>
+          <div className="customer-case-top">
 
-              <span className="customer-case-number">
-                CASE{" "}
-                {String(
-                  ticket.id
-                )
-                  .slice(
-                    0,
-                    8
+            <div className="customer-case-title">
+
+              <div>
+
+                <span className="customer-case-number">
+                  CASE{" "}
+                  {String(
+                    ticket.id
                   )
-                  .toUpperCase()}
+                    .slice(
+                      0,
+                      8
+                    )
+                    .toUpperCase()}
+                </span>
+
+
+                <h3>
+                  {ticket.title
+                    || "Support Case"}
+                </h3>
+
+              </div>
+
+
+              <span
+                className={
+                  getSeverityClass(
+                    ticket.severity
+                  )
+                }
+              >
+                {formatLabel(
+                  ticket.severity
+                )}
               </span>
-
-
-              <h3>
-                {ticket.title
-                  || "Support Case"}
-              </h3>
 
             </div>
 
 
             <span
               className={
-                getSeverityClass(
-                  ticket.severity
+                getStatusClass(
+                  ticket.status
                 )
               }
             >
               {formatLabel(
-                ticket.severity
-              )}
-            </span>
-
-          </div>
-
-
-          <span
-            className={
-              getStatusClass(
-                ticket.status
-              )
-            }
-          >
-            {formatLabel(
-              ticket.status
-            )}
-          </span>
-
-        </div>
-
-
-        {ticket.description && (
-          <p className="customer-case-description">
-            {ticket.description}
-          </p>
-        )}
-
-
-        <div className="customer-case-details">
-
-          <div>
-            <span>
-              Approval
-            </span>
-
-            <strong>
-              {formatLabel(
-                ticket.approval_status
-              )}
-            </strong>
-          </div>
-
-
-          <div>
-            <span>
-              Status
-            </span>
-
-            <strong>
-              {formatLabel(
                 ticket.status
               )}
-            </strong>
+            </span>
+
           </div>
 
 
-          <div>
-            <span>
-              Created
-            </span>
-
-            <strong>
-              {formatDate(
-                ticket.created_at
-              )}
-            </strong>
-          </div>
+          {ticket.description && (
+            <p className="customer-case-description">
+              {ticket.description}
+            </p>
+          )}
 
 
-          <div>
-            <span>
-              Last updated
-            </span>
-
-            <strong>
-              {formatDate(
-                ticket.updated_at
-              )}
-            </strong>
-          </div>
-
-        </div>
-
-
-        {ticket.monday_item_id && (
-          <div className="customer-case-sync">
-
-            <span className="customer-case-sync-icon">
-              ✓
-            </span>
+          <div className="customer-case-details">
 
             <div>
 
+              <span>
+                Approval
+              </span>
+
               <strong>
-                Request synchronized
+                {formatLabel(
+                  ticket.approval_status
+                )}
               </strong>
 
+            </div>
+
+
+            <div>
+
               <span>
-                Your request has been transferred
-                to the support workflow.
+                Status
               </span>
+
+              <strong>
+                {formatLabel(
+                  ticket.status
+                )}
+              </strong>
+
+            </div>
+
+
+            <div>
+
+              <span>
+                Created
+              </span>
+
+              <strong>
+                {formatDate(
+                  ticket.created_at
+                )}
+              </strong>
+
+            </div>
+
+
+            <div>
+
+              <span>
+                Last updated
+              </span>
+
+              <strong>
+                {formatDate(
+                  ticket.updated_at
+                )}
+              </strong>
 
             </div>
 
           </div>
-        )}
 
 
-        {ticket.failure_reason && (
-          <div className="alert alert-error customer-case-alert">
+          {ticket.monday_item_id && (
+            <div className="customer-case-sync">
 
-            <div>
-
-              <strong>
-                Case processing issue
-              </strong>
-
-              <span>
-                {ticket.failure_reason}
+              <span className="customer-case-sync-icon">
+                ✓
               </span>
 
-            </div>
-
-          </div>
-        )}
-
-
-        <div className="customer-case-footer">
-
-          <div>
-
-            <span>
-              Ticket ID
-            </span>
-
-            <code>
-              {ticket.id}
-            </code>
-
-          </div>
-
-
-          <button
-            type="button"
-            className="ticket-conversation-button"
-            onClick={() =>
-              toggleCaseConversation(
-                ticket.id
-              )
-            }
-          >
-            {conversationOpen
-              ? "Hide conversation"
-              : "💬 View conversation"}
-          </button>
-
-        </div>
-
-
-        {conversationOpen && (
-          <div className="ticket-conversation-panel customer-conversation-panel">
-
-            <div className="ticket-conversation-header">
 
               <div>
 
-                <h4>
-                  Case Conversation
-                </h4>
+                <strong>
+                  Request synchronized
+                </strong>
 
-                <p>
-                  Messages between you and Harbor support.
-                </p>
+                <span>
+                  Your request has been transferred
+                  to the support workflow.
+                </span>
 
               </div>
 
+            </div>
+          )}
 
-              <button
-                type="button"
-                className="conversation-refresh-button"
-                onClick={() =>
-                  loadCaseUpdates(
-                    ticket.id
-                  )
-                }
-                aria-label="Refresh conversation"
-              >
-                ↻
-              </button>
+
+          {ticket.failure_reason && (
+            <div className="alert alert-error customer-case-alert">
+
+              <div>
+
+                <strong>
+                  Case processing issue
+                </strong>
+
+                <span>
+                  {ticket.failure_reason}
+                </span>
+
+              </div>
+
+            </div>
+          )}
+
+
+          <div className="customer-case-footer">
+
+            <div>
+
+              <span>
+                Ticket ID
+              </span>
+
+              <code>
+                {ticket.id}
+              </code>
 
             </div>
 
 
-            {caseUpdatesLoading
-              ? (
-                <div className="conversation-loading">
-                  Loading conversation...
-                </div>
-              )
-              : caseUpdates.length === 0
-                ? (
-                  <div className="conversation-empty">
-                    No replies yet.
-                  </div>
-                )
-                : (
-                  <div className="ticket-update-list">
-
-                    {caseUpdates.map(
-                      (update) => {
-
-                        const fromCustomer =
-                          update.update_type
-                          === "customer_reply";
-
-
-                        return (
-                          <div
-                            key={
-                              update.id
-                            }
-                            className={
-                              fromCustomer
-                                ? (
-                                  "ticket-update "
-                                  + "ticket-update-customer"
-                                )
-                                : (
-                                  "ticket-update "
-                                  + "ticket-update-staff"
-                                )
-                            }
-                          >
-
-                            <div className="ticket-update-top">
-
-                              <strong>
-                                {fromCustomer
-                                  ? "You"
-                                  : "Harbor Support"}
-                              </strong>
-
-
-                              <span>
-                                {formatDate(
-                                  update.created_at
-                                )}
-                              </span>
-
-                            </div>
-
-
-                            <p>
-                              {update.content}
-                            </p>
-
-                          </div>
-                        );
-                      }
-                    )}
-
-                  </div>
-                )}
-
-
-            {caseConversationError && (
-              <div className="conversation-error">
-                {caseConversationError}
-              </div>
-            )}
-
-
-            <form
-              className="ticket-update-composer"
-              onSubmit={(event) =>
-                submitCaseReply(
-                  event,
+            <button
+              type="button"
+              className="ticket-conversation-button ticket-conversation-button-unread"
+              onClick={() =>
+                toggleCaseConversation(
                   ticket.id
                 )
               }
             >
 
-              <textarea
-                rows="3"
-                value={
-                  caseReply
-                }
-                onChange={(event) =>
-                  setCaseReply(
-                    event.target.value
-                  )
-                }
-                placeholder="Write a reply to Harbor support..."
-                disabled={
-                  caseReplySubmitting
-                }
-              />
+              <span>
+                {conversationOpen
+                  ? "Hide conversation"
+                  : "💬 View conversation"}
+              </span>
 
 
-              <div className="ticket-update-composer-footer">
+              {!conversationOpen
+                && unreadCount > 0
+                && (
+                  <span className="conversation-unread-badge">
 
-                <span>
-                  Your reply will be visible to Harbor support.
-                </span>
+                    {unreadCount > 9
+                      ? "9+"
+                      : unreadCount}
+
+                  </span>
+                )}
+
+            </button>
+
+          </div>
+
+
+          {conversationOpen && (
+            <div className="ticket-conversation-panel customer-conversation-panel">
+
+              <div className="ticket-conversation-header">
+
+                <div>
+
+                  <h4>
+                    Case Conversation
+                  </h4>
+
+                  <p>
+                    Messages between you and Harbor support.
+                  </p>
+
+                </div>
 
 
                 <button
-                  type="submit"
-                  className="reply-submit"
-                  disabled={
-                    caseReplySubmitting
-                    || !caseReply.trim()
+                  type="button"
+                  className="conversation-refresh-button"
+                  onClick={() =>
+                    loadCaseUpdates(
+                      ticket.id
+                    )
                   }
+                  aria-label="Refresh conversation"
                 >
-                  {caseReplySubmitting
-                    ? "Sending..."
-                    : "Send reply"}
+                  ↻
                 </button>
 
               </div>
 
-            </form>
 
-          </div>
-        )}
+              {caseUpdatesLoading
+                ? (
+                  <div className="conversation-loading">
+                    Loading conversation...
+                  </div>
+                )
 
-      </article>
-    );
-  };
+                : caseUpdates.length === 0
+                  ? (
+                    <div className="conversation-empty">
+                      No replies yet.
+                    </div>
+                  )
+
+                  : (
+                    <div className="ticket-update-list">
+
+                      {caseUpdates.map(
+                        (
+                          update
+                        ) => {
+                          const fromCustomer =
+                            update.update_type
+                            === "customer_reply";
+
+
+                          return (
+                            <div
+                              key={
+                                update.id
+                              }
+                              className={
+                                fromCustomer
+                                  ? (
+                                    "ticket-update "
+                                    + "ticket-update-customer"
+                                  )
+                                  : (
+                                    "ticket-update "
+                                    + "ticket-update-staff"
+                                  )
+                              }
+                            >
+
+                              <div className="ticket-update-top">
+
+                                <strong>
+                                  {fromCustomer
+                                    ? "You"
+                                    : "Harbor Support"}
+                                </strong>
+
+
+                                <span>
+                                  {formatDate(
+                                    update.created_at
+                                  )}
+                                </span>
+
+                              </div>
+
+
+                              <p>
+                                {update.content}
+                              </p>
+
+                            </div>
+                          );
+                        }
+                      )}
+
+                    </div>
+                  )}
+
+
+              {caseConversationError && (
+                <div className="conversation-error">
+                  {caseConversationError}
+                </div>
+              )}
+
+
+              <form
+                className="ticket-update-composer"
+                onSubmit={(event) =>
+                  submitCaseReply(
+                    event,
+                    ticket.id
+                  )
+                }
+              >
+
+                <textarea
+                  rows="3"
+                  value={
+                    caseReply
+                  }
+                  onChange={(event) =>
+                    setCaseReply(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Write a reply to Harbor support..."
+                  disabled={
+                    caseReplySubmitting
+                  }
+                />
+
+
+                <div className="ticket-update-composer-footer">
+
+                  <span>
+                    Your reply will be visible to Harbor support.
+                  </span>
+
+
+                  <button
+                    type="submit"
+                    className="reply-submit"
+                    disabled={
+                      caseReplySubmitting
+                      || !caseReply.trim()
+                    }
+                  >
+                    {caseReplySubmitting
+                      ? "Sending..."
+                      : "Send reply"}
+                  </button>
+
+                </div>
+
+              </form>
+
+            </div>
+          )}
+
+        </article>
+      );
+    };
 
 
   /* =======================================================
@@ -1312,6 +2239,10 @@ export default function ChatPage() {
       <div className="background-orb app-orb-two" />
 
 
+      {/* =================================================
+          TOPBAR
+          ================================================= */}
+
       <nav className="topbar">
 
         <div className="topbar-inner">
@@ -1321,6 +2252,7 @@ export default function ChatPage() {
             <div className="brand-icon brand-icon-small">
               H
             </div>
+
 
             <div>
 
@@ -1354,6 +2286,195 @@ export default function ChatPage() {
 
           <div className="topbar-actions">
 
+            {/* =============================================
+                NOTIFICATION BELL
+                ============================================= */}
+
+            <div
+              className="notification-menu-wrapper"
+              ref={
+                notificationMenuRef
+              }
+            >
+
+              <button
+                type="button"
+                className="notification-bell-button"
+                onClick={() =>
+                  setNotificationMenuOpen(
+                    (
+                      current
+                    ) =>
+                      !current
+                  )
+                }
+                aria-label="Notifications"
+              >
+                <span className="notification-bell-icon">
+                  🔔
+                </span>
+
+
+                {totalUnreadNotifications > 0 && (
+                  <span className="notification-bell-badge">
+
+                    {totalUnreadNotifications > 9
+                      ? "9+"
+                      : totalUnreadNotifications}
+
+                  </span>
+                )}
+
+              </button>
+
+
+              {notificationMenuOpen && (
+                <div className="notification-dropdown">
+
+                  <div className="notification-dropdown-header">
+
+                    <div>
+
+                      <strong>
+                        Notifications
+                      </strong>
+
+                      <span>
+                        Harbor support replies
+                      </span>
+
+                    </div>
+
+
+                    {totalUnreadNotifications > 0 && (
+                      <span className="notification-dropdown-count">
+                        {totalUnreadNotifications}
+                      </span>
+                    )}
+
+                  </div>
+
+
+                  <div className="notification-dropdown-list">
+
+                    {messageNotifications.length === 0
+                      ? (
+                        <div className="notification-dropdown-empty">
+
+                          <div>
+                            ✓
+                          </div>
+
+                          <strong>
+                            You're all caught up
+                          </strong>
+
+                          <span>
+                            New support replies
+                            will appear here.
+                          </span>
+
+                        </div>
+                      )
+
+                      : messageNotifications.map(
+                        (
+                          notification
+                        ) => {
+                          const ticketId =
+                            notification.ticket_id;
+
+                          const unread =
+                            (
+                              unreadByCase[
+                                ticketId
+                              ]
+                              || 0
+                            ) > 0;
+
+
+                          return (
+                            <button
+                              key={
+                                notification.id
+                              }
+                              type="button"
+                              className={
+                                unread
+                                  ? (
+                                    "notification-dropdown-item "
+                                    + "notification-dropdown-item-unread"
+                                  )
+                                  : "notification-dropdown-item"
+                              }
+                              onClick={() =>
+                                openCaseFromNotification(
+                                  notification
+                                )
+                              }
+                            >
+
+                              <div className="notification-dropdown-avatar notification-dropdown-avatar-support">
+                                H
+                              </div>
+
+
+                              <div className="notification-dropdown-copy">
+
+                                <div className="notification-dropdown-title">
+
+                                  <strong>
+                                    Harbor Support
+                                  </strong>
+
+
+                                  {unread && (
+                                    <span className="notification-unread-dot" />
+                                  )}
+
+                                </div>
+
+
+                                <p>
+                                  {notification.content}
+                                </p>
+
+
+                                <div className="notification-dropdown-footer">
+
+                                  <span>
+                                    {notification.ticket?.title
+                                      || "Support Case"}
+                                  </span>
+
+
+                                  <span>
+                                    {formatRelativeTime(
+                                      notification.created_at
+                                    )}
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                            </button>
+                          );
+                        }
+                      )}
+
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+
+            {/* =============================================
+                USER
+                ============================================= */}
+
             <div className="user-chip">
 
               <div className="avatar">
@@ -1362,6 +2483,7 @@ export default function ChatPage() {
                   ?.toUpperCase()
                   || "U"}
               </div>
+
 
               <div className="user-chip-copy">
 
@@ -1395,7 +2517,15 @@ export default function ChatPage() {
       </nav>
 
 
+      {/* =================================================
+          MAIN
+          ================================================= */}
+
       <main className="chat-page">
+
+        {/* =================================================
+            HERO
+            ================================================= */}
 
         <section className="chat-hero">
 
@@ -1405,11 +2535,13 @@ export default function ChatPage() {
               HARBOR SUPPORT
             </span>
 
+
             <h1>
               {activeView === "chat"
                 ? "How can we help?"
                 : "My Cases"}
             </h1>
+
 
             <p>
               {activeView === "chat"
@@ -1456,6 +2588,10 @@ export default function ChatPage() {
         </section>
 
 
+        {/* =================================================
+            CUSTOMER VIEW TABS
+            ================================================= */}
+
         <div className="customer-view-tabs">
 
           <button
@@ -1494,508 +2630,1139 @@ export default function ChatPage() {
           >
             ◫ My Cases
 
+
             {cases.length > 0 && (
               <span className="customer-tab-count">
                 {cases.length}
               </span>
             )}
+
           </button>
 
         </div>
 
 
         {/* =================================================
-            AI CHAT
+            AI SUPPORT
             ================================================= */}
 
         {activeView === "chat" && (
-          <section className="chat-workspace glass-card">
+          <section className="harbor-ai-layout glass-card">
 
-            <div className="chat-workspace-header">
+            {/* =============================================
+                CONVERSATION SIDEBAR
+                ============================================= */}
 
-              <div className="assistant-heading">
+            <aside className="conversation-sidebar">
 
-                <div className="assistant-avatar">
-                  H
-                </div>
+              <button
+                type="button"
+                className="sidebar-new-chat"
+                onClick={
+                  startNewConversation
+                }
+                disabled={
+                  sending
+                }
+              >
 
-                <div>
+                <span className="sidebar-new-chat-plus">
+                  ＋
+                </span>
 
-                  <h2>
-                    Harbor AI Assistant
-                  </h2>
+                New chat
 
-                  <p>
-                    Secure, grounded support powered by your knowledge base.
-                  </p>
+              </button>
 
-                </div>
+
+              <div className="sidebar-search-shell">
+
+                <span className="sidebar-search-icon">
+                  ⌕
+                </span>
+
+
+                <input
+                  type="text"
+                  value={
+                    conversationSearch
+                  }
+                  onChange={(event) =>
+                    setConversationSearch(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Search chats"
+                />
 
               </div>
 
 
-              <span className="badge badge-success">
-                Online
-              </span>
+              <div className="sidebar-heading-row">
 
-            </div>
+                <span>
+                  Recent conversations
+                </span>
 
 
-            <div className="chat-thread">
+                <button
+                  type="button"
+                  className="sidebar-refresh"
+                  disabled={
+                    historyRefreshing
+                  }
+                  onClick={() =>
+                    loadConversationHistory(
+                      true
+                    )
+                  }
+                  aria-label="Refresh conversations"
+                >
+                  {historyRefreshing
+                    ? "…"
+                    : "↻"}
+                </button>
 
-              {messages.length === 0 && (
-                <div className="empty-chat">
+              </div>
 
-                  <div className="empty-chat-icon">
-                    ✦
+
+              <div className="sidebar-conversation-scroll">
+
+                {historyError && (
+                  <div className="sidebar-history-error">
+                    {historyError}
                   </div>
+                )}
 
-                  <h3>
-                    Start a conversation
-                  </h3>
 
-                  <p>
-                    Harbor can answer support questions,
-                    remember context, cite sources, and
-                    escalate to a human when needed.
-                  </p>
+                {historyLoading
+                  ? (
+                    <div className="sidebar-history-loading">
 
-
-                  <div className="suggestion-grid">
-
-                    <button
-                      type="button"
-                      className="suggestion-card"
-                      onClick={() =>
-                        setInput(
-                          "What is your refund policy?"
-                        )
-                      }
-                    >
-                      <span>
-                        ↳
-                      </span>
-
-                      <div>
-
-                        <strong>
-                          Refund policy
-                        </strong>
-
-                        <small>
-                          Ask about support policies
-                        </small>
-
-                      </div>
-                    </button>
-
-
-                    <button
-                      type="button"
-                      className="suggestion-card"
-                      onClick={() =>
-                        setInput(
-                          "I need help with my account."
-                        )
-                      }
-                    >
-                      <span>
-                        ?
-                      </span>
-
-                      <div>
-
-                        <strong>
-                          Account support
-                        </strong>
-
-                        <small>
-                          Get guided assistance
-                        </small>
-
-                      </div>
-                    </button>
-
-
-                    <button
-                      type="button"
-                      className="suggestion-card"
-                      onClick={() =>
-                        setInput(
-                          "I want to speak with a human support agent."
-                        )
-                      }
-                    >
-                      <span>
-                        ↗
-                      </span>
-
-                      <div>
-
-                        <strong>
-                          Human support
-                        </strong>
-
-                        <small>
-                          Request escalation
-                        </small>
-
-                      </div>
-                    </button>
-
-                  </div>
-
-                </div>
-              )}
-
-
-              {messages.map(
-                (message) => (
-                  <div
-                    key={
-                      message.id
-                    }
-                    className={
-                      message.role === "user"
-                        ? "message-row message-row-user"
-                        : "message-row message-row-assistant"
-                    }
-                  >
-
-                    {message.role
-                      === "assistant"
-                      && (
-                        <div className="message-avatar assistant-message-avatar">
-                          H
-                        </div>
-                      )}
-
-
-                    <div
-                      className={
-                        message.role === "user"
-                          ? "message-bubble user-bubble"
-                          : "message-bubble assistant-bubble"
-                      }
-                    >
-
-                      <div className="message-meta">
-
-                        <strong>
-                          {message.role === "user"
-                            ? "You"
-                            : "Harbor"}
-                        </strong>
-
-                        {message.role
-                          === "assistant"
-                          && (
-                            <span>
-                              {message.streaming
-                                ? "Responding..."
-                                : "AI Assistant"}
-                            </span>
-                          )}
-
-                      </div>
-
-
-                      {message.role === "assistant"
-                        && message.streaming
-                        && !message.content
-                        ? (
-                          <div className="typing-dots">
-                            <span />
-                            <span />
-                            <span />
-                          </div>
-                        )
-                        : (
-                          <p className="message-content">
-                            {message.content}
-                          </p>
-                        )}
-
-
-                      {message.role
-                        === "assistant"
-                        && !message.streaming
-                        && (
-                          <>
-
-                            <div className="message-tags">
-
-                              {message.action && (
-                                <span className="badge">
-                                  {formatLabel(
-                                    message.action
-                                  )}
-                                </span>
-                              )}
-
-
-                              {message.severity && (
-                                <span
-                                  className={
-                                    getSeverityClass(
-                                      message.severity
-                                    )
-                                  }
-                                >
-                                  {formatLabel(
-                                    message.severity
-                                  )}
-                                </span>
-                              )}
-
-                            </div>
-
-
-                            {message.escalationRequired && (
-                              <div className="escalation-card">
-
-                                <div className="escalation-card-header">
-
-                                  <div className="escalation-icon">
-                                    !
-                                  </div>
-
-                                  <div>
-
-                                    <strong>
-                                      Human support required
-                                    </strong>
-
-                                    <p>
-                                      Harbor identified that this request
-                                      requires support-agent review.
-                                    </p>
-
-                                  </div>
-
-                                </div>
-
-
-                                {message.ticketId
-                                  ? (
-                                    <div className="ticket-detail-grid">
-
-                                      <div>
-
-                                        <span>
-                                          Ticket ID
-                                        </span>
-
-                                        <strong className="ticket-id">
-                                          {String(
-                                            message.ticketId
-                                          ).slice(
-                                            0,
-                                            12
-                                          )}
-                                        </strong>
-
-                                      </div>
-
-
-                                      <div>
-
-                                        <span>
-                                          Status
-                                        </span>
-
-                                        <strong>
-                                          {formatLabel(
-                                            message.ticketStatus
-                                          )}
-                                        </strong>
-
-                                      </div>
-
-
-                                      <div>
-
-                                        <span>
-                                          Approval
-                                        </span>
-
-                                        <strong>
-                                          {formatLabel(
-                                            message.approvalStatus
-                                          )}
-                                        </strong>
-
-                                      </div>
-
-                                    </div>
-                                  )
-                                  : (
-                                    <div className="ticket-confirmation-note">
-                                      No support ticket has been created yet.
-                                    </div>
-                                  )}
-
-                              </div>
-                            )}
-
-
-                            {message.citations
-                              ?.length > 0
-                              && (
-                                <div className="citation-panel">
-
-                                  <div className="citation-heading">
-                                    ◫ Sources
-                                  </div>
-
-                                  <div className="citation-list">
-
-                                    {message.citations.map(
-                                      (
-                                        citation,
-                                        citationIndex
-                                      ) => (
-                                        <div
-                                          className="citation-chip"
-                                          key={
-                                            citationIndex
-                                          }
-                                        >
-
-                                          <strong>
-                                            {citation.source}
-                                          </strong>
-
-                                          {citation.chunk_index
-                                            !== undefined
-                                            && (
-                                              <span>
-                                                Chunk{" "}
-                                                {citation.chunk_index}
-                                              </span>
-                                            )}
-
-                                        </div>
-                                      )
-                                    )}
-
-                                  </div>
-
-                                </div>
-                              )}
-
-                          </>
-                        )}
+                      <div className="sidebar-history-skeleton" />
+                      <div className="sidebar-history-skeleton" />
+                      <div className="sidebar-history-skeleton" />
+                      <div className="sidebar-history-skeleton" />
 
                     </div>
+                  )
 
+                  : filteredConversations.length === 0
+                    ? (
+                      <div className="sidebar-history-empty">
 
-                    {message.role
-                      === "user"
-                      && (
-                        <div className="message-avatar user-message-avatar">
-                          {user?.email
-                            ?.charAt(0)
-                            ?.toUpperCase()
-                            || "U"}
+                        <div className="sidebar-empty-icon">
+                          ✦
                         </div>
-                      )}
-
-                  </div>
-                )
-              )}
 
 
-              <div
-                ref={
-                  messagesEndRef
-                }
-              />
-
-            </div>
+                        <strong>
+                          {conversationSearch
+                            ? "No matching chats"
+                            : "No conversations yet"}
+                        </strong>
 
 
-            {error && (
-              <div className="alert alert-error chat-error">
+                        <span>
+                          {conversationSearch
+                            ? "Try another search."
+                            : (
+                              "Start a new chat and your "
+                              + "history will appear here."
+                            )}
+                        </span>
+
+                      </div>
+                    )
+
+                    : (
+                      <div className="sidebar-conversation-list">
+
+                        {filteredConversations.map(
+                          (
+                            conversation
+                          ) => (
+                            <button
+                              key={
+                                conversation.id
+                              }
+                              type="button"
+                              className={
+                                conversation.id
+                                === conversationId
+                                  ? (
+                                    "sidebar-conversation-item "
+                                    + "sidebar-conversation-item-active"
+                                  )
+                                  : "sidebar-conversation-item"
+                              }
+                              disabled={
+                                openingConversationId
+                                === conversation.id
+                              }
+                              onClick={() =>
+                                openConversation(
+                                  conversation.id
+                                )
+                              }
+                            >
+
+                              <div className="sidebar-conversation-top">
+
+                                <span className="sidebar-conversation-title">
+
+                                  {conversation.title
+                                    || "New Support Conversation"}
+
+                                </span>
+
+
+                                <span className="sidebar-conversation-time">
+
+                                  {formatRelativeTime(
+                                    conversation.updated_at
+                                    || conversation.created_at
+                                  )}
+
+                                </span>
+
+                              </div>
+
+
+                              <span className="sidebar-conversation-preview">
+
+                                {conversation.preview
+                                  || "Open conversation"}
+
+                              </span>
+
+                            </button>
+                          )
+                        )}
+
+                      </div>
+                    )}
+
+              </div>
+
+
+              <div className="sidebar-footer">
+
+                <div className="sidebar-footer-icon">
+                  H
+                </div>
+
 
                 <div>
 
                   <strong>
-                    Request failed
+                    Harbor AI
                   </strong>
 
                   <span>
-                    {error}
+                    Conversations saved securely
                   </span>
 
                 </div>
 
               </div>
-            )}
+
+            </aside>
 
 
-            <div className="chat-composer-shell">
+            {/* =============================================
+                CHAT AREA
+                ============================================= */}
 
-              <form
-                className="chat-composer"
-                onSubmit={
-                  sendMessage
-                }
-              >
+            <div className="sidebar-chat-area">
 
-                <textarea
-                  rows="1"
-                  value={
-                    input
-                  }
-                  onChange={(event) =>
-                    setInput(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={
-                    handleKeyDown
-                  }
-                  placeholder="Ask Harbor anything..."
-                  disabled={
-                    sending
-                  }
-                />
+              <div className="chat-workspace-header">
+
+                <div className="assistant-heading">
+
+                  <div className="assistant-avatar">
+                    H
+                  </div>
 
 
-                <button
-                  type="submit"
-                  className="send-button"
-                  disabled={
-                    sending
-                    || !input.trim()
-                  }
-                >
-                  {sending
-                    ? (
-                      <span className="button-spinner" />
-                    )
-                    : "↑"}
-                </button>
+                  <div>
 
-              </form>
+                    <h2>
+                      Harbor AI Assistant
+                    </h2>
+
+                    <p>
+                      Secure support powered by
+                      your knowledge base.
+                    </p>
+
+                  </div>
+
+                </div>
 
 
-              <div className="composer-footer">
+                <div className="assistant-header-status">
 
-                <span>
-                  Press Enter to send ·
-                  Shift + Enter for a new line
-                </span>
+                  {conversationId && (
+                    <span className="active-chat-indicator">
+                      Active conversation
+                    </span>
+                  )}
 
 
-                {conversationId && (
-                  <span className="conversation-pill">
-                    Conversation active
+                  <span className="badge badge-success">
+                    Online
                   </span>
-                )}
+
+                </div>
 
               </div>
+
+
+              {openingConversationId
+                ? (
+                  <div className="sidebar-chat-loading">
+
+                    <div className="loader-spinner" />
+
+
+                    <strong>
+                      Opening conversation
+                    </strong>
+
+
+                    <span>
+                      Loading messages and sources...
+                    </span>
+
+                  </div>
+                )
+
+                : (
+                  <>
+
+                    {/* =====================================
+                        WELCOME DASHBOARD
+                        ===================================== */}
+
+                    {messages.length === 0 && (
+                      <div className="harbor-welcome-dashboard">
+
+                        <div className="welcome-main">
+
+                          <div className="welcome-ai-mark">
+                            ✦
+                          </div>
+
+
+                          <span className="welcome-eyebrow">
+                            HARBOR AI COPILOT
+                          </span>
+
+
+                          <h2>
+                            What can I help you with today?
+                          </h2>
+
+
+                          <p>
+                            Get grounded answers, continue previous
+                            conversations, or request human support
+                            when you need it.
+                          </p>
+
+                        </div>
+
+
+                        {/* =================================
+                            SUGGESTED PROMPTS
+                            ================================= */}
+
+                        <div className="welcome-quick-grid">
+
+                          <button
+                            type="button"
+                            className="welcome-quick-card"
+                            onClick={() =>
+                              useQuickPrompt(
+                                "What is your refund policy?"
+                              )
+                            }
+                          >
+
+                            <div className="welcome-quick-icon">
+                              ↳
+                            </div>
+
+
+                            <div>
+
+                              <strong>
+                                Refund policy
+                              </strong>
+
+                              <span>
+                                Understand refunds,
+                                eligibility and timelines
+                              </span>
+
+                            </div>
+
+
+                            <span className="welcome-card-arrow">
+                              →
+                            </span>
+
+                          </button>
+
+
+                          <button
+                            type="button"
+                            className="welcome-quick-card"
+                            onClick={() =>
+                              useQuickPrompt(
+                                "I need help with my account."
+                              )
+                            }
+                          >
+
+                            <div className="welcome-quick-icon">
+                              ◉
+                            </div>
+
+
+                            <div>
+
+                              <strong>
+                                Account support
+                              </strong>
+
+                              <span>
+                                Get guided help with
+                                your Harbor account
+                              </span>
+
+                            </div>
+
+
+                            <span className="welcome-card-arrow">
+                              →
+                            </span>
+
+                          </button>
+
+
+                          <button
+                            type="button"
+                            className="welcome-quick-card"
+                            onClick={() =>
+                              useQuickPrompt(
+                                "I was charged twice and need help."
+                              )
+                            }
+                          >
+
+                            <div className="welcome-quick-icon">
+                              $
+                            </div>
+
+
+                            <div>
+
+                              <strong>
+                                Billing issue
+                              </strong>
+
+                              <span>
+                                Get help with charges
+                                and payment problems
+                              </span>
+
+                            </div>
+
+
+                            <span className="welcome-card-arrow">
+                              →
+                            </span>
+
+                          </button>
+
+
+                          <button
+                            type="button"
+                            className="welcome-quick-card"
+                            onClick={() =>
+                              useQuickPrompt(
+                                "I want to speak with a human support agent."
+                              )
+                            }
+                          >
+
+                            <div className="welcome-quick-icon">
+                              ↗
+                            </div>
+
+
+                            <div>
+
+                              <strong>
+                                Human support
+                              </strong>
+
+                              <span>
+                                Escalate a request
+                                to the Harbor team
+                              </span>
+
+                            </div>
+
+
+                            <span className="welcome-card-arrow">
+                              →
+                            </span>
+
+                          </button>
+
+                        </div>
+
+
+                        {/* =================================
+                            LOWER DASHBOARD
+                            ================================= */}
+
+                        <div className="welcome-lower-grid">
+
+                          {/* ===============================
+                              CAPABILITIES
+                              =============================== */}
+
+                          <section className="welcome-capabilities">
+
+                            <div className="welcome-section-heading">
+
+                              <span>
+                                Harbor capabilities
+                              </span>
+
+                            </div>
+
+
+                            <div className="capability-grid">
+
+                              <div className="capability-item">
+
+                                <span className="capability-icon">
+                                  ✓
+                                </span>
+
+
+                                <div>
+
+                                  <strong>
+                                    Grounded answers
+                                  </strong>
+
+                                  <span>
+                                    Responses backed by your
+                                    support knowledge base.
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+
+                              <div className="capability-item">
+
+                                <span className="capability-icon">
+                                  ◫
+                                </span>
+
+
+                                <div>
+
+                                  <strong>
+                                    Source citations
+                                  </strong>
+
+                                  <span>
+                                    Sources stay available
+                                    when you reopen chats.
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+
+                              <div className="capability-item">
+
+                                <span className="capability-icon">
+                                  ◷
+                                </span>
+
+
+                                <div>
+
+                                  <strong>
+                                    Conversation memory
+                                  </strong>
+
+                                  <span>
+                                    Continue earlier conversations
+                                    without losing context.
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+
+                              <div className="capability-item">
+
+                                <span className="capability-icon">
+                                  ↗
+                                </span>
+
+
+                                <div>
+
+                                  <strong>
+                                    Human escalation
+                                  </strong>
+
+                                  <span>
+                                    Create a support case after
+                                    explicit confirmation.
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                            </div>
+
+                          </section>
+
+
+                          {/* ===============================
+                              RECENT CONVERSATION
+                              =============================== */}
+
+                          <section className="welcome-recent-panel">
+
+                            <div className="welcome-section-heading">
+
+                              <span>
+                                Continue where you left off
+                              </span>
+
+                            </div>
+
+
+                            {recentConversation
+                              ? (
+                                <button
+                                  type="button"
+                                  className="recent-conversation-card"
+                                  onClick={() =>
+                                    openConversation(
+                                      recentConversation.id
+                                    )
+                                  }
+                                >
+
+                                  <div className="recent-conversation-icon">
+                                    ✦
+                                  </div>
+
+
+                                  <div className="recent-conversation-copy">
+
+                                    <strong>
+
+                                      {recentConversation.title
+                                        || "Recent conversation"}
+
+                                    </strong>
+
+
+                                    <span>
+
+                                      {recentConversation.preview
+                                        || "Continue this conversation"}
+
+                                    </span>
+
+                                  </div>
+
+
+                                  <div className="recent-conversation-meta">
+
+                                    <span>
+
+                                      {formatRelativeTime(
+                                        recentConversation.updated_at
+                                        || recentConversation.created_at
+                                      )}
+
+                                    </span>
+
+
+                                    <strong>
+                                      →
+                                    </strong>
+
+                                  </div>
+
+                                </button>
+                              )
+
+                              : (
+                                <div className="no-recent-conversation">
+
+                                  <div>
+                                    ✦
+                                  </div>
+
+
+                                  <strong>
+                                    Your first conversation starts here
+                                  </strong>
+
+
+                                  <span>
+                                    Choose a suggestion above
+                                    or type your own question.
+                                  </span>
+
+                                </div>
+                              )}
+
+                          </section>
+
+                        </div>
+
+                      </div>
+                    )}
+
+
+                    {/* =====================================
+                        CHAT THREAD
+                        ===================================== */}
+
+                    {messages.length > 0 && (
+                      <div className="chat-thread">
+
+                        {messages.map(
+                          (
+                            message
+                          ) => (
+                            <div
+                              key={
+                                message.id
+                              }
+                              className={
+                                message.role
+                                === "user"
+                                  ? (
+                                    "message-row "
+                                    + "message-row-user"
+                                  )
+                                  : (
+                                    "message-row "
+                                    + "message-row-assistant"
+                                  )
+                              }
+                            >
+
+                              {message.role
+                                === "assistant"
+                                && (
+                                  <div className="message-avatar assistant-message-avatar">
+                                    H
+                                  </div>
+                                )}
+
+
+                              <div
+                                className={
+                                  message.role
+                                  === "user"
+                                    ? (
+                                      "message-bubble "
+                                      + "user-bubble"
+                                    )
+                                    : (
+                                      "message-bubble "
+                                      + "assistant-bubble"
+                                    )
+                                }
+                              >
+
+                                <div className="message-meta">
+
+                                  <strong>
+
+                                    {message.role === "user"
+                                      ? "You"
+                                      : "Harbor"}
+
+                                  </strong>
+
+
+                                  {message.role
+                                    === "assistant"
+                                    && (
+                                      <span>
+
+                                        {message.streaming
+                                          ? "Responding..."
+                                          : "AI Assistant"}
+
+                                      </span>
+                                    )}
+
+                                </div>
+
+
+                                {message.role
+                                  === "assistant"
+                                  && message.streaming
+                                  && !message.content
+
+                                  ? (
+                                    <div className="typing-dots">
+                                      <span />
+                                      <span />
+                                      <span />
+                                    </div>
+                                  )
+
+                                  : (
+                                    <p className="message-content">
+                                      {message.content}
+                                    </p>
+                                  )}
+
+
+                                {message.role
+                                  === "assistant"
+                                  && !message.streaming
+                                  && (
+                                    <>
+
+                                      <div className="message-tags">
+
+                                        {message.action && (
+                                          <span className="badge">
+
+                                            {formatLabel(
+                                              message.action
+                                            )}
+
+                                          </span>
+                                        )}
+
+
+                                        {message.severity && (
+                                          <span
+                                            className={
+                                              getSeverityClass(
+                                                message.severity
+                                              )
+                                            }
+                                          >
+
+                                            {formatLabel(
+                                              message.severity
+                                            )}
+
+                                          </span>
+                                        )}
+
+                                      </div>
+
+
+                                      {message.escalationRequired && (
+                                        <div className="escalation-card">
+
+                                          <div className="escalation-card-header">
+
+                                            <div className="escalation-icon">
+                                              !
+                                            </div>
+
+
+                                            <div>
+
+                                              <strong>
+                                                Human support required
+                                              </strong>
+
+
+                                              <p>
+                                                Harbor identified that this
+                                                request requires support-agent
+                                                review.
+                                              </p>
+
+                                            </div>
+
+                                          </div>
+
+
+                                          {message.ticketId
+                                            ? (
+                                              <div className="ticket-detail-grid">
+
+                                                <div>
+
+                                                  <span>
+                                                    Ticket ID
+                                                  </span>
+
+                                                  <strong className="ticket-id">
+
+                                                    {String(
+                                                      message.ticketId
+                                                    ).slice(
+                                                      0,
+                                                      12
+                                                    )}
+
+                                                  </strong>
+
+                                                </div>
+
+
+                                                <div>
+
+                                                  <span>
+                                                    Status
+                                                  </span>
+
+                                                  <strong>
+
+                                                    {formatLabel(
+                                                      message.ticketStatus
+                                                    )}
+
+                                                  </strong>
+
+                                                </div>
+
+
+                                                <div>
+
+                                                  <span>
+                                                    Approval
+                                                  </span>
+
+                                                  <strong>
+
+                                                    {formatLabel(
+                                                      message.approvalStatus
+                                                    )}
+
+                                                  </strong>
+
+                                                </div>
+
+                                              </div>
+                                            )
+
+                                            : (
+                                              <div className="ticket-confirmation-note">
+                                                No support ticket has
+                                                been created yet.
+                                              </div>
+                                            )}
+
+                                        </div>
+                                      )}
+
+
+                                      {message.citations
+                                        ?.length > 0
+                                        && (
+                                          <div className="citation-panel">
+
+                                            <div className="citation-heading">
+                                              ◫ Sources
+                                            </div>
+
+
+                                            <div className="citation-list">
+
+                                              {message.citations.map(
+                                                (
+                                                  citation,
+                                                  citationIndex
+                                                ) => (
+                                                  <div
+                                                    className="citation-chip"
+                                                    key={
+                                                      citationIndex
+                                                    }
+                                                  >
+
+                                                    <strong>
+                                                      {citation.source}
+                                                    </strong>
+
+
+                                                    {citation.chunk_index
+                                                      !== undefined
+                                                      && (
+                                                        <span>
+
+                                                          Chunk{" "}
+                                                          {
+                                                            citation
+                                                              .chunk_index
+                                                          }
+
+                                                        </span>
+                                                      )}
+
+                                                  </div>
+                                                )
+                                              )}
+
+                                            </div>
+
+                                          </div>
+                                        )}
+
+                                    </>
+                                  )}
+
+                              </div>
+
+
+                              {message.role
+                                === "user"
+                                && (
+                                  <div className="message-avatar user-message-avatar">
+
+                                    {user?.email
+                                      ?.charAt(0)
+                                      ?.toUpperCase()
+                                      || "U"}
+
+                                  </div>
+                                )}
+
+                            </div>
+                          )
+                        )}
+
+
+                        <div
+                          ref={
+                            messagesEndRef
+                          }
+                        />
+
+                      </div>
+                    )}
+
+
+                    {/* =====================================
+                        ERROR
+                        ===================================== */}
+
+                    {error && (
+                      <div className="alert alert-error chat-error">
+
+                        <div>
+
+                          <strong>
+                            Request failed
+                          </strong>
+
+                          <span>
+                            {error}
+                          </span>
+
+                        </div>
+
+                      </div>
+                    )}
+
+
+                    {/* =====================================
+                        COMPOSER
+                        ===================================== */}
+
+                    <div className="chat-composer-shell">
+
+                      <form
+                        className="chat-composer"
+                        onSubmit={
+                          sendMessage
+                        }
+                      >
+
+                        <textarea
+                          rows="1"
+                          value={
+                            input
+                          }
+                          onChange={(event) =>
+                            setInput(
+                              event.target.value
+                            )
+                          }
+                          onKeyDown={
+                            handleKeyDown
+                          }
+                          placeholder="Ask Harbor anything..."
+                          disabled={
+                            sending
+                          }
+                        />
+
+
+                        <button
+                          type="submit"
+                          className="send-button"
+                          disabled={
+                            sending
+                            || !input.trim()
+                          }
+                        >
+                          {sending
+                            ? (
+                              <span className="button-spinner" />
+                            )
+                            : "↑"}
+                        </button>
+
+                      </form>
+
+
+                      <div className="composer-footer">
+
+                        <span>
+                          Press Enter to send ·
+                          Shift + Enter for a new line
+                        </span>
+
+
+                        {conversationId && (
+                          <span className="conversation-pill">
+                            Conversation active
+                          </span>
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  </>
+                )}
 
             </div>
 
@@ -2018,8 +3785,10 @@ export default function ChatPage() {
                   Support Cases
                 </h2>
 
+
                 <p>
-                  Track cases and communicate with Harbor support.
+                  Track your support requests and
+                  communicate with Harbor support.
                 </p>
 
               </div>
@@ -2074,6 +3843,7 @@ export default function ChatPage() {
 
                 </div>
               )
+
               : cases.length === 0
                 ? (
                   <div className="cases-empty">
@@ -2082,9 +3852,11 @@ export default function ChatPage() {
                       ✓
                     </div>
 
+
                     <h3>
                       No support cases yet
                     </h3>
+
 
                     <p>
                       Confirmed human-support requests
@@ -2093,6 +3865,7 @@ export default function ChatPage() {
 
                   </div>
                 )
+
                 : (
                   <>
 
@@ -2126,7 +3899,8 @@ export default function ChatPage() {
                             }
                             type="button"
                             className={
-                              activeCaseTab === key
+                              activeCaseTab
+                              === key
                                 ? (
                                   "case-status-tab "
                                   + "case-status-tab-active"
@@ -2141,17 +3915,22 @@ export default function ChatPage() {
                               setExpandedCaseId(
                                 null
                               );
+
+                              setCaseUpdates([]);
                             }}
                           >
 
                             {label}
 
+
                             <span className="case-status-count">
+
                               {
                                 caseGroups[
                                   key
                                 ].length
                               }
+
                             </span>
 
                           </button>
@@ -2168,30 +3947,38 @@ export default function ChatPage() {
                         <div>
 
                           <h3>
+
                             {
                               caseTabConfig[
                                 activeCaseTab
                               ].title
                             }
+
                           </h3>
 
+
                           <p>
+
                             {
                               caseTabConfig[
                                 activeCaseTab
                               ].description
                             }
+
                           </p>
 
                         </div>
 
 
                         <span className="customer-case-panel-count">
+
                           {activeCaseGroup.length}
                           {" "}
+
                           {activeCaseGroup.length === 1
                             ? "case"
                             : "cases"}
+
                         </span>
 
                       </div>
@@ -2205,9 +3992,11 @@ export default function ChatPage() {
                               ✓
                             </div>
 
+
                             <h3>
                               Nothing here
                             </h3>
+
 
                             <p>
                               You currently have no
@@ -2216,6 +4005,7 @@ export default function ChatPage() {
 
                           </div>
                         )
+
                         : (
                           <div className="customer-case-list">
 

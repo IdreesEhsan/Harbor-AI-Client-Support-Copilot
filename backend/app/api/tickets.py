@@ -1,3 +1,5 @@
+import logging
+from time import perf_counter
 from uuid import UUID
 
 from fastapi import (
@@ -7,8 +9,16 @@ from fastapi import (
     status,
 )
 
+from fastapi.concurrency import (
+    run_in_threadpool,
+)
+
 from app.dependencies.auth import (
     require_roles,
+)
+
+from app.realtime.manager import (
+    notification_manager,
 )
 
 from app.services.ticket_execution_service import (
@@ -25,9 +35,11 @@ from app.services.ticket_service import (
     InvalidTicketUpdateTypeError,
     TicketAlreadyDecidedError,
     TicketNotFoundError,
+    UnsafeTicketContentError,
     create_customer_ticket_reply,
     create_staff_ticket_update,
     decide_ticket_approval,
+    get_staff_ticket_for_update,
     get_user_ticket,
     list_customer_ticket_updates,
     list_staff_ticket_updates,
@@ -51,8 +63,29 @@ router = APIRouter(
 )
 
 
+logger = logging.getLogger(
+    "harbor.tickets_api"
+)
+
+
 # ============================================================
-# CUSTOMER — MY CASES
+# TIMING
+# ============================================================
+
+def _milliseconds(
+    started_at: float,
+) -> float:
+    return (
+        (
+            perf_counter()
+            - started_at
+        )
+        * 1000
+    )
+
+
+# ============================================================
+# CUSTOMER — LIST CASES
 # ============================================================
 
 @router.get(
@@ -68,21 +101,18 @@ def list_my_tickets(
         )
     ),
 ):
-    """
-    Return support tickets belonging only to the
-    authenticated customer.
-    """
-
     return list_user_tickets(
         user_id=str(
-            current_user["id"]
+            current_user[
+                "id"
+            ]
         ),
         limit=100,
     )
 
 
 # ============================================================
-# CUSTOMER — CASE CONVERSATION
+# CUSTOMER — CASE UPDATES
 # ============================================================
 
 @router.get(
@@ -99,13 +129,6 @@ def get_my_ticket_updates(
         )
     ),
 ):
-    """
-    Return customer-visible conversation entries for one
-    customer-owned support ticket.
-
-    Internal notes are never returned.
-    """
-
     try:
         return (
             list_customer_ticket_updates(
@@ -114,21 +137,29 @@ def get_my_ticket_updates(
                 ),
 
                 user_id=str(
-                    current_user["id"]
+                    current_user[
+                        "id"
+                    ]
                 ),
             )
         )
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
             status_code=(
                 status.HTTP_404_NOT_FOUND
             ),
+
             detail=str(
                 exc
             ),
         ) from exc
 
+
+# ============================================================
+# CUSTOMER — SEND REPLY + REALTIME PUSH
+# ============================================================
 
 @router.post(
     "/mine/{ticket_id}/updates",
@@ -137,7 +168,7 @@ def get_my_ticket_updates(
         status.HTTP_201_CREATED
     ),
 )
-def reply_to_my_ticket(
+async def reply_to_my_ticket(
     ticket_id: UUID,
     payload: TicketUpdateRequest,
     current_user=Depends(
@@ -147,36 +178,257 @@ def reply_to_my_ticket(
     ),
 ):
     """
-    Add one customer reply to an owned support ticket.
+    Optimized customer message path.
+
+    Before:
+        ticket lookup
+        guardrail
+        insert
+        author profile lookup
+        second ticket lookup
+        WebSocket push
+
+    Now:
+        one ticket lookup
+        guardrail
+        insert
+        author built from current_user
+        WebSocket push
     """
 
+    total_started_at = (
+        perf_counter()
+    )
+
+
     try:
-        return (
-            create_customer_ticket_reply(
-                ticket_id=str(
-                    ticket_id
+        ticket_id_str = str(
+            ticket_id
+        )
+
+
+        user_id = str(
+            current_user[
+                "id"
+            ]
+        )
+
+
+        # ----------------------------------------------------
+        # 1. OWNERSHIP CHECK — ONCE
+        # ----------------------------------------------------
+
+        lookup_started_at = (
+            perf_counter()
+        )
+
+
+        ticket = (
+            await run_in_threadpool(
+                get_user_ticket,
+
+                ticket_id=(
+                    ticket_id_str
                 ),
 
-                user_id=str(
-                    current_user["id"]
+                user_id=user_id,
+            )
+        )
+
+
+        lookup_duration = (
+            _milliseconds(
+                lookup_started_at
+            )
+        )
+
+
+        if ticket is None:
+            raise TicketNotFoundError(
+                "Support ticket was not found."
+            )
+
+
+        # ----------------------------------------------------
+        # 2. CREATE UPDATE
+        #
+        # Pass both ticket and authenticated user so service
+        # does NOT query either of them again.
+        # ----------------------------------------------------
+
+        create_started_at = (
+            perf_counter()
+        )
+
+
+        update = (
+            await run_in_threadpool(
+                create_customer_ticket_reply,
+
+                ticket_id=(
+                    ticket_id_str
                 ),
+
+                user_id=user_id,
 
                 content=(
                     payload.content
                 ),
+
+                ticket=ticket,
+
+                author_profile=(
+                    current_user
+                ),
             )
         )
+
+
+        create_duration = (
+            _milliseconds(
+                create_started_at
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # 3. REALTIME PUSH
+        # ----------------------------------------------------
+
+        websocket_started_at = (
+            perf_counter()
+        )
+
+
+        await notification_manager.send_to_staff(
+            payload={
+                "type":
+                    "ticket_message",
+
+                "recipient":
+                    "staff",
+
+                "id":
+                    update.get(
+                        "id"
+                    ),
+
+                "ticket_id":
+                    ticket_id_str,
+
+                "update_type":
+                    "customer_reply",
+
+                "content":
+                    update.get(
+                        "content"
+                    ),
+
+                "created_at":
+                    update.get(
+                        "created_at"
+                    ),
+
+                "author":
+                    update.get(
+                        "author"
+                    ),
+
+                "ticket": {
+                    "id":
+                        ticket.get(
+                            "id"
+                        ),
+
+                    "title":
+                        ticket.get(
+                            "title"
+                        ),
+
+                    "status":
+                        ticket.get(
+                            "status"
+                        ),
+
+                    "approval_status":
+                        ticket.get(
+                            "approval_status"
+                        ),
+
+                    "severity":
+                        ticket.get(
+                            "severity"
+                        ),
+
+                    "user_id":
+                        ticket.get(
+                            "user_id"
+                        ),
+                },
+            }
+        )
+
+
+        websocket_duration = (
+            _milliseconds(
+                websocket_started_at
+            )
+        )
+
+
+        logger.info(
+            (
+                "Customer reply request completed | "
+                "ticket_id=%s | "
+                "lookup_ms=%.2f | "
+                "create_ms=%.2f | "
+                "websocket_ms=%.2f | "
+                "total_ms=%.2f"
+            ),
+            ticket_id_str,
+            lookup_duration,
+            create_duration,
+            websocket_duration,
+            _milliseconds(
+                total_started_at
+            ),
+        )
+
+
+        return update
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
             status_code=(
                 status.HTTP_404_NOT_FOUND
             ),
+
             detail=str(
                 exc
             ),
         ) from exc
 
+
+    except (
+        UnsafeTicketContentError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+# ============================================================
+# CUSTOMER — GET CASE
+# ============================================================
 
 @router.get(
     "/mine/{ticket_id}",
@@ -190,20 +442,20 @@ def get_my_ticket(
         )
     ),
 ):
-    """
-    Return one ticket belonging to the authenticated
-    customer.
-    """
+    ticket = (
+        get_user_ticket(
+            ticket_id=str(
+                ticket_id
+            ),
 
-    ticket = get_user_ticket(
-        ticket_id=str(
-            ticket_id
-        ),
-
-        user_id=str(
-            current_user["id"]
-        ),
+            user_id=str(
+                current_user[
+                    "id"
+                ]
+            ),
+        )
     )
+
 
     if ticket is None:
         raise HTTPException(
@@ -216,11 +468,12 @@ def get_my_ticket(
             ),
         )
 
+
     return ticket
 
 
 # ============================================================
-# STAFF — GLOBAL SUPPORT QUEUE
+# STAFF — LIST ALL TICKETS
 # ============================================================
 
 @router.get(
@@ -237,17 +490,13 @@ def list_tickets(
         )
     ),
 ):
-    """
-    Return all Harbor support tickets visible to staff.
-    """
-
     return list_staff_tickets(
         limit=100,
     )
 
 
 # ============================================================
-# STAFF — TICKET CONVERSATION
+# STAFF — GET TIMELINE
 # ============================================================
 
 @router.get(
@@ -265,12 +514,6 @@ def get_staff_ticket_updates(
         )
     ),
 ):
-    """
-    Return complete staff ticket timeline.
-
-    Includes internal notes.
-    """
-
     try:
         return (
             list_staff_ticket_updates(
@@ -279,6 +522,7 @@ def get_staff_ticket_updates(
                 )
             )
         )
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
@@ -292,6 +536,10 @@ def get_staff_ticket_updates(
         ) from exc
 
 
+# ============================================================
+# STAFF — REPLY / INTERNAL NOTE
+# ============================================================
+
 @router.post(
     "/{ticket_id}/updates",
     response_model=TicketUpdateRecord,
@@ -299,7 +547,7 @@ def get_staff_ticket_updates(
         status.HTTP_201_CREATED
     ),
 )
-def create_staff_update(
+async def create_staff_update(
     ticket_id: UUID,
     payload: StaffTicketUpdateRequest,
     current_user=Depends(
@@ -310,25 +558,85 @@ def create_staff_update(
     ),
 ):
     """
-    Add either:
+    Optimized staff message path.
 
-    - customer-visible staff reply;
-    - staff-only internal note.
+    The ticket is fetched only once.
+
+    The authenticated staff profile is reused rather than
+    querying the users table again.
+
+    Internal notes still NEVER emit a customer WebSocket
+    event.
     """
 
+    total_started_at = (
+        perf_counter()
+    )
+
+
     try:
-        return (
-            create_staff_ticket_update(
-                ticket_id=str(
-                    ticket_id
+        ticket_id_str = str(
+            ticket_id
+        )
+
+
+        # ----------------------------------------------------
+        # 1. TICKET CHECK — ONCE
+        # ----------------------------------------------------
+
+        lookup_started_at = (
+            perf_counter()
+        )
+
+
+        ticket = (
+            await run_in_threadpool(
+                get_staff_ticket_for_update,
+
+                ticket_id=(
+                    ticket_id_str
+                ),
+            )
+        )
+
+
+        lookup_duration = (
+            _milliseconds(
+                lookup_started_at
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # 2. CREATE UPDATE
+        #
+        # No additional ticket lookup.
+        # No additional staff profile lookup.
+        # ----------------------------------------------------
+
+        create_started_at = (
+            perf_counter()
+        )
+
+
+        update = (
+            await run_in_threadpool(
+                create_staff_ticket_update,
+
+                ticket_id=(
+                    ticket_id_str
                 ),
 
                 staff_id=str(
-                    current_user["id"]
+                    current_user[
+                        "id"
+                    ]
                 ),
 
                 staff_role=str(
-                    current_user["role"]
+                    current_user[
+                        "role"
+                    ]
                 ),
 
                 update_type=(
@@ -338,8 +646,151 @@ def create_staff_update(
                 content=(
                     payload.content
                 ),
+
+                ticket=ticket,
+
+                author_profile=(
+                    current_user
+                ),
             )
         )
+
+
+        create_duration = (
+            _milliseconds(
+                create_started_at
+            )
+        )
+
+
+        websocket_duration = (
+            0.0
+        )
+
+
+        # ----------------------------------------------------
+        # 3. CUSTOMER REALTIME PUSH
+        #
+        # Absolutely nothing is emitted for internal_note.
+        # ----------------------------------------------------
+
+        if (
+            payload.update_type
+            == "staff_reply"
+        ):
+            websocket_started_at = (
+                perf_counter()
+            )
+
+
+            customer_id = str(
+                ticket[
+                    "user_id"
+                ]
+            )
+
+
+            await notification_manager.send_to_customer(
+                user_id=customer_id,
+
+                payload={
+                    "type":
+                        "ticket_message",
+
+                    "recipient":
+                        "customer",
+
+                    "id":
+                        update.get(
+                            "id"
+                        ),
+
+                    "ticket_id":
+                        ticket_id_str,
+
+                    "update_type":
+                        "staff_reply",
+
+                    "content":
+                        update.get(
+                            "content"
+                        ),
+
+                    "created_at":
+                        update.get(
+                            "created_at"
+                        ),
+
+                    "author":
+                        update.get(
+                            "author"
+                        ),
+
+                    "ticket": {
+                        "id":
+                            ticket.get(
+                                "id"
+                            ),
+
+                        "title":
+                            ticket.get(
+                                "title"
+                            ),
+
+                        "status":
+                            ticket.get(
+                                "status"
+                            ),
+
+                        "approval_status":
+                            ticket.get(
+                                "approval_status"
+                            ),
+
+                        "severity":
+                            ticket.get(
+                                "severity"
+                            ),
+
+                        "user_id":
+                            ticket.get(
+                                "user_id"
+                            ),
+                    },
+                },
+            )
+
+
+            websocket_duration = (
+                _milliseconds(
+                    websocket_started_at
+                )
+            )
+
+
+        logger.info(
+            (
+                "Staff update request completed | "
+                "ticket_id=%s | "
+                "type=%s | "
+                "lookup_ms=%.2f | "
+                "create_ms=%.2f | "
+                "websocket_ms=%.2f | "
+                "total_ms=%.2f"
+            ),
+            ticket_id_str,
+            payload.update_type,
+            lookup_duration,
+            create_duration,
+            websocket_duration,
+            _milliseconds(
+                total_started_at
+            ),
+        )
+
+
+        return update
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
@@ -351,6 +802,7 @@ def create_staff_update(
                 exc
             ),
         ) from exc
+
 
     except InvalidTicketUpdateTypeError as exc:
         raise HTTPException(
@@ -364,8 +816,24 @@ def create_staff_update(
         ) from exc
 
 
+    except (
+        UnsafeTicketContentError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
 # ============================================================
-# STAFF — SINGLE TICKET
+# STAFF — GET ONE TICKET
 # ============================================================
 
 @router.get(
@@ -381,16 +849,13 @@ def get_ticket(
         )
     ),
 ):
-    """
-    Return one support ticket for authorized staff review.
-    """
-
     try:
         return review_ticket(
             ticket_id=str(
                 ticket_id
             )
         )
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
@@ -405,7 +870,7 @@ def get_ticket(
 
 
 # ============================================================
-# STAFF — HUMAN APPROVAL
+# STAFF — APPROVAL
 # ============================================================
 
 @router.post(
@@ -424,12 +889,6 @@ def decide_ticket(
         )
     ),
 ):
-    """
-    Approve or reject a pending Harbor support ticket.
-
-    Approval changes Harbor's internal state only.
-    """
-
     try:
         return (
             decide_ticket_approval(
@@ -438,7 +897,9 @@ def decide_ticket(
                 ),
 
                 reviewer_id=str(
-                    current_user["id"]
+                    current_user[
+                        "id"
+                    ]
                 ),
 
                 approved=(
@@ -446,6 +907,7 @@ def decide_ticket(
                 ),
             )
         )
+
 
     except TicketNotFoundError as exc:
         raise HTTPException(
@@ -457,6 +919,7 @@ def decide_ticket(
                 exc
             ),
         ) from exc
+
 
     except TicketAlreadyDecidedError as exc:
         raise HTTPException(
@@ -471,7 +934,7 @@ def decide_ticket(
 
 
 # ============================================================
-# STAFF — APPROVED EXECUTION
+# STAFF — EXECUTE APPROVED TICKET
 # ============================================================
 
 @router.post(
@@ -487,10 +950,6 @@ def execute_ticket(
         )
     ),
 ):
-    """
-    Execute a previously approved Harbor support ticket.
-    """
-
     try:
         return (
             execute_approved_ticket(
@@ -499,6 +958,7 @@ def execute_ticket(
                 )
             )
         )
+
 
     except TicketExecutionNotFoundError as exc:
         raise HTTPException(
@@ -510,6 +970,7 @@ def execute_ticket(
                 exc
             ),
         ) from exc
+
 
     except (
         TicketNotApprovedForExecutionError,
@@ -526,6 +987,7 @@ def execute_ticket(
             ),
         ) from exc
 
+
     except TicketExternalExecutionError as exc:
         raise HTTPException(
             status_code=(
@@ -536,6 +998,7 @@ def execute_ticket(
                 exc
             ),
         ) from exc
+
 
     except TicketExecutionPersistenceError as exc:
         raise HTTPException(

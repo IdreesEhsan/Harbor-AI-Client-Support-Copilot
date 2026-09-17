@@ -1,16 +1,26 @@
 import re
 from typing import Any
 
-from app.agent.graph import harbor_graph
-from app.agent.schemas import AgentResponse
-from app.core.config import get_settings
+from app.agent.graph import (
+    harbor_graph,
+)
+
+from app.agent.schemas import (
+    AgentResponse,
+)
+
+from app.core.config import (
+    get_settings,
+)
 
 from app.guardrails.execution_control import (
     ExecutionLimitExceededError,
 )
+
 from app.guardrails.output_guardrail import (
     evaluate_output,
 )
+
 from app.guardrails.pipeline import (
     run_input_guardrails,
 )
@@ -18,6 +28,7 @@ from app.guardrails.pipeline import (
 from app.services.conversation_memory import (
     update_summary_memory,
 )
+
 from app.services.conversation_service import (
     finalize_conversation_turn,
     load_conversation_summary,
@@ -25,16 +36,18 @@ from app.services.conversation_service import (
     prepare_conversation,
     save_user_message,
 )
+
 from app.services.memory_service import (
     format_history,
 )
+
 from app.services.ticket_service import (
     prepare_support_ticket,
 )
 
 
 # ============================================================
-# Safe responses
+# SAFE RESPONSES
 # ============================================================
 
 SAFE_OUTPUT_FALLBACK = (
@@ -82,18 +95,16 @@ CONFIRMATION_MARKER = (
 
 
 # ============================================================
-# Escalation intent rules
+# ACTION ESCALATION PATTERNS
 # ============================================================
 
 ACTION_ESCALATION_PATTERNS = (
-    # Refund actions
     r"\bi want (?:a|my)?\s*refund\b",
     r"\bi need (?:a|my)?\s*refund\b",
     r"\brefund (?:my|the|this)\b",
     r"\brefund me\b",
     r"\bplease refund\b",
 
-    # Duplicate / disputed payments
     r"\bcharged twice\b",
     r"\bdouble charged\b",
     r"\bduplicate charge\b",
@@ -103,19 +114,16 @@ ACTION_ESCALATION_PATTERNS = (
     r"\bunauthorized charge\b",
     r"\bchargeback\b",
 
-    # Cancellation actions
     r"\bcancel my subscription\b",
     r"\bcancel my order\b",
     r"\bcancel my account\b",
     r"\bplease cancel\b",
     r"\bi want to cancel\b",
 
-    # Account-sensitive actions
     r"\bdelete my account\b",
     r"\bclose my account\b",
     r"\bterminate my account\b",
 
-    # Explicit human support requests
     r"\bi want (?:a|an)?\s*human\b",
     r"\bi need (?:a|an)?\s*human\b",
     r"\bhuman support\b",
@@ -163,16 +171,12 @@ NEGATIVE_RESPONSES = {
 
 
 # ============================================================
-# Confirmation helpers
+# CONFIRMATION HELPERS
 # ============================================================
 
 def normalize_confirmation_text(
     message: str,
 ) -> str:
-    """
-    Normalize a short yes/no confirmation reply.
-    """
-
     normalized = (
         message
         .strip()
@@ -197,19 +201,10 @@ def normalize_confirmation_text(
 def is_affirmative_response(
     message: str,
 ) -> bool:
-    """
-    Return True when the customer clearly approves
-    ticket creation.
-    """
-
-    normalized = (
+    return (
         normalize_confirmation_text(
             message
         )
-    )
-
-    return (
-        normalized
         in AFFIRMATIVE_RESPONSES
     )
 
@@ -217,19 +212,10 @@ def is_affirmative_response(
 def is_negative_response(
     message: str,
 ) -> bool:
-    """
-    Return True when the customer clearly declines
-    ticket creation.
-    """
-
-    normalized = (
+    return (
         normalize_confirmation_text(
             message
         )
-    )
-
-    return (
-        normalized
         in NEGATIVE_RESPONSES
     )
 
@@ -238,17 +224,8 @@ def requires_ticket_confirmation(
     message: str,
 ) -> bool:
     """
-    Detect requests that involve a real-world support action.
-
-    General informational questions should not trigger this.
-
-    Example:
-
-        "What is your refund policy?"
-            -> False
-
-        "I was charged twice and want a refund."
-            -> True
+    Detect a support action rather than an informational
+    question.
     """
 
     if not isinstance(
@@ -281,8 +258,11 @@ def has_pending_ticket_confirmation(
     recent_messages: list[dict[str, Any]],
 ) -> bool:
     """
-    Detect whether Harbor's most recent assistant message
-    asked the customer to confirm ticket creation.
+    Search recent assistant history for an unresolved Harbor
+    ticket-confirmation prompt.
+
+    Do not return False merely because a later assistant
+    reminder does not contain the original marker.
     """
 
     for item in reversed(
@@ -301,10 +281,11 @@ def has_pending_ticket_confirmation(
             )
         )
 
-        return (
+        if (
             CONFIRMATION_MARKER
             in content
-        )
+        ):
+            return True
 
     return False
 
@@ -313,22 +294,8 @@ def get_pending_escalation_message(
     recent_messages: list[dict[str, Any]],
 ) -> str | None:
     """
-    Recover the original customer request that caused Harbor
-    to ask for ticket confirmation.
-
-    Expected history:
-
-        user:
-            duplicate charge request
-
-        assistant:
-            ... Would you like me to create a support ticket?
-
-        current user:
-            yes
-
-    The current "yes" is not yet included in recent_messages,
-    so we can safely recover the previous customer request.
+    Find the original customer request immediately preceding
+    the ticket-confirmation prompt.
     """
 
     confirmation_index = None
@@ -338,18 +305,18 @@ def get_pending_escalation_message(
         -1,
         -1,
     ):
-        message = (
+        history_message = (
             recent_messages[index]
         )
 
         if (
-            message.get("role")
+            history_message.get("role")
             != "assistant"
         ):
             continue
 
         content = str(
-            message.get(
+            history_message.get(
                 "content",
                 "",
             )
@@ -359,7 +326,9 @@ def get_pending_escalation_message(
             CONFIRMATION_MARKER
             in content
         ):
-            confirmation_index = index
+            confirmation_index = (
+                index
+            )
             break
 
     if confirmation_index is None:
@@ -370,18 +339,18 @@ def get_pending_escalation_message(
         -1,
         -1,
     ):
-        message = (
+        history_message = (
             recent_messages[index]
         )
 
         if (
-            message.get("role")
+            history_message.get("role")
             != "user"
         ):
             continue
 
         content = str(
-            message.get(
+            history_message.get(
                 "content",
                 "",
             )
@@ -394,16 +363,12 @@ def get_pending_escalation_message(
 
 
 # ============================================================
-# Severity
+# SEVERITY
 # ============================================================
 
 def normalize_severity(
     severity: str | None,
 ) -> str:
-    """
-    Normalize model severity into Harbor's supported values.
-    """
-
     allowed = {
         "low",
         "medium",
@@ -411,10 +376,7 @@ def normalize_severity(
         "critical",
     }
 
-    if (
-        severity
-        in allowed
-    ):
+    if severity in allowed:
         return severity
 
     return "medium"
@@ -424,10 +386,6 @@ def determine_ticket_severity(
     message: str,
     graph_severity: str | None = None,
 ) -> str:
-    """
-    Apply a minimum severity for important payment issues.
-    """
-
     severity = (
         normalize_severity(
             graph_severity
@@ -472,17 +430,12 @@ def determine_ticket_severity(
 
 
 # ============================================================
-# Ticket helpers
+# TICKET HELPERS
 # ============================================================
 
 def build_escalation_title(
     message: str,
 ) -> str:
-    """
-    Build a deterministic ticket title from the customer's
-    original request.
-    """
-
     cleaned = (
         message.strip()
     )
@@ -494,10 +447,7 @@ def build_escalation_title(
 
     max_length = 80
 
-    if (
-        len(cleaned)
-        <= max_length
-    ):
+    if len(cleaned) <= max_length:
         return cleaned
 
     return (
@@ -515,12 +465,6 @@ def create_escalation_ticket(
     message: str,
     severity: str,
 ) -> dict:
-    """
-    Create Harbor's internal pending-approval ticket.
-
-    No Monday.com or n8n action occurs here.
-    """
-
     safe_severity = (
         normalize_severity(
             severity
@@ -549,17 +493,84 @@ def create_escalation_ticket(
 
 
 # ============================================================
-# Safe conversation persistence helpers
+# METADATA HELPERS
+# ============================================================
+
+def serialize_citations(
+    citations: list[Any] | None,
+) -> list[dict[str, Any]]:
+    """
+    Convert Pydantic Citation objects or dictionaries into
+    JSON-compatible dictionaries before saving to Supabase.
+    """
+
+    serialized = []
+
+    for citation in (
+        citations or []
+    ):
+        if isinstance(
+            citation,
+            dict,
+        ):
+            serialized.append(
+                citation
+            )
+
+        elif hasattr(
+            citation,
+            "model_dump",
+        ):
+            serialized.append(
+                citation.model_dump()
+            )
+
+    return serialized
+
+
+def build_message_metadata(
+    *,
+    action: str,
+    severity: str,
+    citations: list[Any] | None = None,
+    escalation_required: bool = False,
+    ticket_id: str | None = None,
+    ticket_status: str | None = None,
+    approval_status: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "action":
+            action,
+
+        "severity":
+            severity,
+
+        "citations":
+            serialize_citations(
+                citations
+            ),
+
+        "escalation_required":
+            escalation_required,
+
+        "ticket_id":
+            ticket_id,
+
+        "ticket_status":
+            ticket_status,
+
+        "approval_status":
+            approval_status,
+    }
+
+
+# ============================================================
+# SAFE CONVERSATION FINALIZATION
 # ============================================================
 
 def update_summary_safely(
     conversation_id: str,
 ) -> None:
-    """
-    Summary generation must never break the active support
-    conversation.
-    """
-
     try:
         update_summary_memory(
             conversation_id
@@ -573,9 +584,10 @@ def finish_turn(
     *,
     conversation_id: str,
     answer: str,
+    metadata: dict[str, Any],
 ) -> None:
     """
-    Persist Harbor's assistant response and update summary.
+    Persist the complete reconstructable assistant turn.
     """
 
     finalize_conversation_turn(
@@ -584,6 +596,8 @@ def finish_turn(
         ),
 
         assistant_message=answer,
+
+        metadata=metadata,
     )
 
     update_summary_safely(
@@ -592,7 +606,7 @@ def finish_turn(
 
 
 # ============================================================
-# Main Harbor agent
+# MAIN AGENT
 # ============================================================
 
 def run_agent(
@@ -600,28 +614,10 @@ def run_agent(
     user_id: str,
     conversation_id: str | None = None,
 ) -> AgentResponse:
-    """
-    Execute one persistent Harbor support turn.
-
-    Ticket flow:
-
-        action request
-            ↓
-        explain / answer
-            ↓
-        ask customer confirmation
-            ↓
-        customer says yes
-            ↓
-        create support ticket
-            ↓
-        staff review
-    """
-
     settings = get_settings()
 
     # ========================================================
-    # 1. Validate request
+    # 1. VALIDATE REQUEST
     # ========================================================
 
     if not isinstance(
@@ -640,7 +636,7 @@ def run_agent(
         )
 
     # ========================================================
-    # 2. Input guardrails
+    # 2. INPUT GUARDRAILS
     # ========================================================
 
     guardrail_result = (
@@ -660,10 +656,12 @@ def run_agent(
         )
 
     else:
-        safe_message = message
+        safe_message = (
+            message
+        )
 
     # ========================================================
-    # 3. Prepare conversation
+    # 3. CONVERSATION
     # ========================================================
 
     conversation = (
@@ -680,7 +678,7 @@ def run_agent(
     )
 
     # ========================================================
-    # 4. Load existing memory BEFORE current message
+    # 4. LOAD MEMORY BEFORE CURRENT MESSAGE
     # ========================================================
 
     recent_messages = (
@@ -695,8 +693,10 @@ def run_agent(
         )
     )
 
-    history = format_history(
-        recent_messages
+    history = (
+        format_history(
+            recent_messages
+        )
     )
 
     conversation_summary = (
@@ -706,7 +706,7 @@ def run_agent(
     )
 
     # ========================================================
-    # 5. Check pending confirmation
+    # 5. CHECK PENDING TICKET CONFIRMATION
     # ========================================================
 
     pending_confirmation = (
@@ -725,7 +725,7 @@ def run_agent(
         )
 
     # ========================================================
-    # 6. Persist current customer message
+    # 6. SAVE CURRENT CUSTOMER MESSAGE
     # ========================================================
 
     save_user_message(
@@ -736,7 +736,7 @@ def run_agent(
     )
 
     # ========================================================
-    # 7. Handle existing ticket confirmation
+    # 7. EXISTING TICKET CONFIRMATION
     # ========================================================
 
     if (
@@ -744,11 +744,13 @@ def run_agent(
         and pending_request
     ):
         # ----------------------------------------------------
-        # Customer confirmed YES
+        # YES
         # ----------------------------------------------------
 
-        if is_affirmative_response(
-            safe_message
+        if (
+            is_affirmative_response(
+                safe_message
+            )
         ):
             severity = (
                 determine_ticket_severity(
@@ -776,8 +778,32 @@ def run_agent(
             answer = (
                 f"{TICKET_CREATED_RESPONSE}\n\n"
                 f"Ticket ID: {ticket['id']}\n"
-                f"Status: {ticket.get('status', 'pending_approval')}\n"
-                f"Approval: {ticket.get('approval_status', 'pending')}"
+                f"Status: "
+                f"{ticket.get('status', 'pending_approval')}\n"
+                f"Approval: "
+                f"{ticket.get('approval_status', 'pending')}"
+            )
+
+            metadata = (
+                build_message_metadata(
+                    action="escalate",
+                    severity=severity,
+                    citations=[],
+                    escalation_required=True,
+                    ticket_id=str(
+                        ticket["id"]
+                    ),
+                    ticket_status=(
+                        ticket.get(
+                            "status"
+                        )
+                    ),
+                    approval_status=(
+                        ticket.get(
+                            "approval_status"
+                        )
+                    ),
+                )
             )
 
             finish_turn(
@@ -785,6 +811,7 @@ def run_agent(
                     active_conversation_id
                 ),
                 answer=answer,
+                metadata=metadata,
             )
 
             return AgentResponse(
@@ -820,14 +847,25 @@ def run_agent(
             )
 
         # ----------------------------------------------------
-        # Customer confirmed NO
+        # NO
         # ----------------------------------------------------
 
-        if is_negative_response(
-            safe_message
+        if (
+            is_negative_response(
+                safe_message
+            )
         ):
             answer = (
                 TICKET_CANCELLED_RESPONSE
+            )
+
+            metadata = (
+                build_message_metadata(
+                    action="answer",
+                    severity="low",
+                    citations=[],
+                    escalation_required=False,
+                )
             )
 
             finish_turn(
@@ -835,6 +873,7 @@ def run_agent(
                     active_conversation_id
                 ),
                 answer=answer,
+                metadata=metadata,
             )
 
             return AgentResponse(
@@ -860,11 +899,27 @@ def run_agent(
             )
 
         # ----------------------------------------------------
-        # Customer gave unclear confirmation
+        # UNCLEAR
         # ----------------------------------------------------
+
+        severity = (
+            determine_ticket_severity(
+                pending_request,
+                "medium",
+            )
+        )
 
         answer = (
             TICKET_CONFIRMATION_REMINDER
+        )
+
+        metadata = (
+            build_message_metadata(
+                action="clarify",
+                severity=severity,
+                citations=[],
+                escalation_required=True,
+            )
         )
 
         finish_turn(
@@ -872,6 +927,7 @@ def run_agent(
                 active_conversation_id
             ),
             answer=answer,
+            metadata=metadata,
         )
 
         return AgentResponse(
@@ -879,12 +935,7 @@ def run_agent(
 
             action="clarify",
 
-            severity=(
-                determine_ticket_severity(
-                    pending_request,
-                    "medium",
-                )
-            ),
+            severity=severity,
 
             citations=[],
 
@@ -902,7 +953,7 @@ def run_agent(
         )
 
     # ========================================================
-    # 8. Prepare LangGraph state
+    # 8. LANGGRAPH INPUT
     # ========================================================
 
     graph_question = (
@@ -913,30 +964,34 @@ def run_agent(
     )
 
     initial_state = {
-        "question": graph_question,
+        "question":
+            graph_question,
 
-        "user_id": user_id,
+        "user_id":
+            user_id,
 
-        "conversation_id": (
-            active_conversation_id
-        ),
+        "conversation_id":
+            active_conversation_id,
 
-        "history": history,
+        "history":
+            history,
 
-        "conversation_summary": (
+        "conversation_summary":
             conversation_summary
-            or ""
-        ),
+            or "",
 
-        "step_count": 0,
+        "step_count":
+            0,
 
-        "tool_call_count": 0,
+        "tool_call_count":
+            0,
 
-        "execution_limit_reached": False,
+        "execution_limit_reached":
+            False,
     }
 
     # ========================================================
-    # 9. Run LangGraph
+    # 9. RUN LANGGRAPH
     # ========================================================
 
     try:
@@ -948,27 +1003,33 @@ def run_agent(
 
     except ExecutionLimitExceededError:
         result = {
-            "answer": (
-                SAFE_EXECUTION_LIMIT_FALLBACK
-            ),
+            "answer":
+                SAFE_EXECUTION_LIMIT_FALLBACK,
 
-            "action": "escalate",
+            "action":
+                "escalate",
 
-            "severity": "medium",
+            "severity":
+                "medium",
 
-            "citations": [],
+            "citations":
+                [],
 
-            "escalation_required": True,
+            "escalation_required":
+                True,
 
-            "execution_limit_reached": True,
+            "execution_limit_reached":
+                True,
         }
 
     # ========================================================
-    # 10. Validate graph contract
+    # 10. VALIDATE RESULT
     # ========================================================
 
-    action = result.get(
-        "action"
+    action = (
+        result.get(
+            "action"
+        )
     )
 
     if action not in {
@@ -977,25 +1038,28 @@ def run_agent(
         "escalate",
     }:
         raise RuntimeError(
-            "Harbor agent returned "
-            "an invalid action."
+            "Harbor agent returned an invalid action."
         )
 
-    raw_answer = result.get(
-        "answer"
+    raw_answer = (
+        result.get(
+            "answer"
+        )
     )
 
-    if not isinstance(
-        raw_answer,
-        str,
-    ) or not raw_answer.strip():
+    if (
+        not isinstance(
+            raw_answer,
+            str,
+        )
+        or not raw_answer.strip()
+    ):
         raise RuntimeError(
-            "Harbor agent returned "
-            "an invalid answer."
+            "Harbor agent returned an invalid answer."
         )
 
     # ========================================================
-    # 11. Output guardrail
+    # 11. OUTPUT GUARDRAIL
     # ========================================================
 
     output_result = (
@@ -1008,7 +1072,9 @@ def run_agent(
         output_result.status
         == "allow"
     ):
-        safe_answer = raw_answer
+        safe_answer = (
+            raw_answer
+        )
 
     elif (
         output_result.status
@@ -1031,7 +1097,7 @@ def run_agent(
         )
 
     # ========================================================
-    # 12. Decide whether customer confirmation is required
+    # 12. CONFIRMATION DECISION
     # ========================================================
 
     deterministic_action_request = (
@@ -1078,16 +1144,34 @@ def run_agent(
         )
     )
 
+    citations = (
+        result.get(
+            "citations",
+            [],
+        )
+    )
+
     # ========================================================
-    # 13. Ask for confirmation — DO NOT create ticket yet
+    # 13. ASK FOR CONFIRMATION
     # ========================================================
 
     if ticket_confirmation_required:
-        action = "clarify"
+        action = (
+            "clarify"
+        )
 
         safe_answer = (
             f"{safe_answer}\n\n"
             f"{TICKET_CONFIRMATION_PROMPT}"
+        )
+
+        metadata = (
+            build_message_metadata(
+                action=action,
+                severity=severity,
+                citations=citations,
+                escalation_required=True,
+            )
         )
 
         finish_turn(
@@ -1095,6 +1179,7 @@ def run_agent(
                 active_conversation_id
             ),
             answer=safe_answer,
+            metadata=metadata,
         )
 
         return AgentResponse(
@@ -1104,10 +1189,7 @@ def run_agent(
 
             severity=severity,
 
-            citations=result.get(
-                "citations",
-                [],
-            ),
+            citations=citations,
 
             escalation_required=True,
 
@@ -1123,14 +1205,24 @@ def run_agent(
         )
 
     # ========================================================
-    # 14. Normal AI response
+    # 14. NORMAL RESPONSE
     # ========================================================
+
+    metadata = (
+        build_message_metadata(
+            action=action,
+            severity=severity,
+            citations=citations,
+            escalation_required=False,
+        )
+    )
 
     finish_turn(
         conversation_id=(
             active_conversation_id
         ),
         answer=safe_answer,
+        metadata=metadata,
     )
 
     return AgentResponse(
@@ -1140,10 +1232,7 @@ def run_agent(
 
         severity=severity,
 
-        citations=result.get(
-            "citations",
-            [],
-        ),
+        citations=citations,
 
         escalation_required=False,
 

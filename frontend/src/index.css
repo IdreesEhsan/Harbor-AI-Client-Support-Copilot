@@ -6013,3 +6013,342 @@ p {
   }
 
 }
+
+/* =========================================================
+   HISTORY WORKSPACE
+   ========================================================= */
+
+.history-workspace {
+  padding: 14px;
+
+  border-radius: 16px;
+}
+
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 14px;
+
+  margin-bottom: 13px;
+
+  padding-bottom: 11px;
+
+  border-bottom:
+    1px solid
+    var(--border);
+}
+
+
+.history-header h2 {
+  margin:
+    0 0 3px;
+
+  color:
+    var(--text-strong);
+
+  font-size: 14px;
+}
+
+
+.history-header p {
+  margin: 0;
+
+  color:
+    var(--text-muted);
+
+  font-size: 9px;
+}
+
+
+.history-header-actions,
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+
+  gap: 7px;
+}
+
+
+.new-chat-button {
+  min-height: 30px;
+
+  padding:
+    0 10px;
+
+  font-size: 8px;
+}
+
+
+/* =========================================================
+   HISTORY LIST
+   ========================================================= */
+
+.conversation-history-list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 8px;
+}
+
+
+.conversation-history-card {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+
+  gap: 10px;
+
+  padding: 11px;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 11px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.82
+    );
+
+  text-align: left;
+
+  cursor: pointer;
+
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    transform var(--transition);
+}
+
+
+.conversation-history-card:hover {
+  background:
+    #ffffff;
+
+  border-color:
+    rgba(
+      79,
+      70,
+      229,
+      0.2
+    );
+
+  transform:
+    translateY(-1px);
+}
+
+
+.conversation-history-card-active {
+  border-color:
+    rgba(
+      79,
+      70,
+      229,
+      0.27
+    );
+
+  background:
+    var(--primary-soft);
+}
+
+
+.history-card-icon {
+  width: 34px;
+  height: 34px;
+
+  flex: 0 0 auto;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 10px;
+
+  background:
+    var(--primary-soft);
+
+  color:
+    var(--primary);
+
+  font-size: 12px;
+  font-weight: 900;
+}
+
+
+.history-card-content {
+  min-width: 0;
+
+  flex: 1;
+}
+
+
+.history-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-bottom: 4px;
+}
+
+
+.history-card-top strong {
+  overflow: hidden;
+
+  color:
+    var(--text-strong);
+
+  font-size: 10px;
+  font-weight: 800;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+.history-card-top span {
+  flex: 0 0 auto;
+
+  color:
+    var(--text-light);
+
+  font-size: 7px;
+}
+
+
+.history-card-content p {
+  overflow: hidden;
+
+  margin: 0;
+
+  color:
+    var(--text-muted);
+
+  font-size: 8px;
+
+  line-height: 1.45;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+.history-card-arrow {
+  flex: 0 0 auto;
+
+  color:
+    var(--text-light);
+
+  font-size: 17px;
+}
+
+
+/* =========================================================
+   HISTORY EMPTY / LOADING
+   ========================================================= */
+
+.history-loading,
+.history-empty {
+  min-height: 220px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+
+  gap: 9px;
+
+  text-align: center;
+
+  color:
+    var(--text-muted);
+}
+
+
+.history-empty-icon {
+  width: 42px;
+  height: 42px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 12px;
+
+  background:
+    var(--primary-soft);
+
+  color:
+    var(--primary);
+
+  font-size: 17px;
+}
+
+
+.history-empty h3 {
+  margin: 0;
+
+  color:
+    var(--text-strong);
+
+  font-size: 12px;
+}
+
+
+.history-empty p {
+  margin: 0 0 5px;
+
+  color:
+    var(--text-muted);
+
+  font-size: 9px;
+}
+
+
+/* =========================================================
+   RESPONSIVE HISTORY
+   ========================================================= */
+
+@media (
+  max-width: 720px
+) {
+
+  .history-header {
+    align-items: stretch;
+
+    flex-direction: column;
+  }
+
+
+  .history-header-actions {
+    width: 100%;
+  }
+
+
+  .history-header-actions
+  .secondary-button {
+    flex: 1;
+  }
+
+
+  .history-card-top {
+    align-items: flex-start;
+
+    flex-direction: column;
+
+    gap: 3px;
+  }
+
+
+  .history-card-content p {
+    white-space: normal;
+  }
+
+}

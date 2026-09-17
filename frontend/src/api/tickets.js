@@ -5,10 +5,6 @@ import apiClient from "./client";
    CUSTOMER TICKETS
    ========================================================= */
 
-/**
- * Return support tickets belonging to the authenticated
- * customer.
- */
 export async function getMyCases() {
   const response =
     await apiClient.get(
@@ -19,10 +15,6 @@ export async function getMyCases() {
 }
 
 
-/**
- * Return one support ticket belonging to the authenticated
- * customer.
- */
 export async function getMyCase(
   ticketId
 ) {
@@ -36,14 +28,9 @@ export async function getMyCase(
 
 
 /* =========================================================
-   CUSTOMER TICKET CONVERSATION
+   CUSTOMER CONVERSATION
    ========================================================= */
 
-/**
- * Return customer-visible conversation entries.
- *
- * The backend excludes internal staff notes.
- */
 export async function getMyCaseUpdates(
   ticketId
 ) {
@@ -56,9 +43,6 @@ export async function getMyCaseUpdates(
 }
 
 
-/**
- * Add a customer reply to a support case.
- */
 export async function replyToMyCase(
   ticketId,
   content
@@ -79,10 +63,6 @@ export async function replyToMyCase(
    STAFF TICKETS
    ========================================================= */
 
-/**
- * Return all Harbor support tickets available to
- * authenticated support staff.
- */
 export async function getTickets() {
   const response =
     await apiClient.get(
@@ -93,9 +73,6 @@ export async function getTickets() {
 }
 
 
-/**
- * Return one support ticket for staff review.
- */
 export async function getTicket(
   ticketId
 ) {
@@ -109,14 +86,9 @@ export async function getTicket(
 
 
 /* =========================================================
-   STAFF TICKET CONVERSATION
+   STAFF CONVERSATION
    ========================================================= */
 
-/**
- * Return the complete ticket timeline for staff.
- *
- * This includes internal notes.
- */
 export async function getTicketUpdates(
   ticketId
 ) {
@@ -129,9 +101,6 @@ export async function getTicketUpdates(
 }
 
 
-/**
- * Add a customer-visible support-agent reply.
- */
 export async function replyToTicket(
   ticketId,
   content
@@ -151,12 +120,6 @@ export async function replyToTicket(
 }
 
 
-/**
- * Add an internal support note.
- *
- * Internal notes must never be exposed by the customer
- * endpoint.
- */
 export async function addInternalNote(
   ticketId,
   content
@@ -180,9 +143,6 @@ export async function addInternalNote(
    STAFF APPROVAL
    ========================================================= */
 
-/**
- * Approve or reject a pending support ticket.
- */
 export async function reviewTicket(
   ticketId,
   approved
@@ -203,17 +163,6 @@ export async function reviewTicket(
    STAFF EXECUTION
    ========================================================= */
 
-/**
- * Execute a previously approved support ticket.
- *
- * Backend remains responsible for:
- *
- * - approval verification
- * - execution claims
- * - idempotency
- * - Monday synchronization
- * - persistence
- */
 export async function executeTicket(
   ticketId
 ) {
