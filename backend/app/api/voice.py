@@ -6,13 +6,22 @@ from fastapi import (
     HTTPException,
     status,
 )
+
 from pydantic import (
     BaseModel,
     Field,
+    StrictBool,
 )
 
 from app.rag.service import (
     answer_question,
+)
+
+from app.services.voice_service import (
+    VoiceCustomerNotFoundError,
+    VoiceTicketConfirmationRequiredError,
+    VoiceTicketCreationError,
+    create_voice_support_ticket,
 )
 
 
@@ -23,22 +32,19 @@ logger = logging.getLogger(
 
 router = APIRouter(
     prefix="/voice",
-    tags=["Voice"],
+    tags=[
+        "Voice",
+    ],
 )
 
 
 # ============================================================
-# REQUEST / RESPONSE SCHEMAS
+# RAG REQUEST / RESPONSE
 # ============================================================
 
 class VoiceKnowledgeRequest(
     BaseModel
 ):
-    """
-    Request sent by the Retell voice agent when the caller
-    asks Harbor an informational support question.
-    """
-
     query: str = Field(
         min_length=1,
         max_length=1000,
@@ -48,10 +54,6 @@ class VoiceKnowledgeRequest(
 class VoiceKnowledgeResponse(
     BaseModel
 ):
-    """
-    Voice-friendly representation of Harbor's RAG answer.
-    """
-
     success: bool
 
     answer: str
@@ -64,30 +66,85 @@ class VoiceKnowledgeResponse(
 
 
 # ============================================================
+# TICKET REQUEST / RESPONSE
+# ============================================================
+
+class VoiceTicketRequest(
+    BaseModel
+):
+    """
+    Ticket request created only after the caller explicitly
+    confirms that Harbor should create a support ticket.
+    """
+
+    customer_email: str = Field(
+        min_length=3,
+        max_length=320,
+    )
+
+    issue: str = Field(
+        min_length=1,
+        max_length=5000,
+    )
+
+    call_id: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+    confirmed: StrictBool
+
+    severity: str = Field(
+        default="medium",
+        min_length=1,
+        max_length=20,
+    )
+
+
+class VoiceTicketResponse(
+    BaseModel
+):
+    success: bool
+
+    ticket_id: str
+
+    status: str
+
+    approval_status: str
+
+    severity: str
+
+    message: str
+
+
+# ============================================================
 # HELPERS
 # ============================================================
 
 def _clean_query(
     query: str,
 ) -> str:
-    """
-    Normalize a caller query before sending it into Harbor's
-    RAG pipeline.
-    """
-
     if not isinstance(
         query,
         str,
     ):
         raise TypeError(
-            "Voice support query must be a string."
+            (
+                "Voice support query "
+                "must be a string."
+            )
         )
 
-    query = query.strip()
+    query = (
+        query.strip()
+    )
 
     if not query:
         raise ValueError(
-            "Voice support query cannot be empty."
+            (
+                "Voice support query "
+                "cannot be empty."
+            )
         )
 
     return query
@@ -96,14 +153,6 @@ def _clean_query(
 def _extract_sources(
     citations: list[Any],
 ) -> list[str]:
-    """
-    Convert Harbor citation objects into a simple unique
-    list of source names suitable for a Retell response.
-
-    Retell does not need the complete citation metadata
-    because citations are not normally spoken aloud.
-    """
-
     sources: list[str] = []
 
     for citation in citations:
@@ -133,6 +182,29 @@ def _extract_sources(
 
 
 # ============================================================
+# HEALTH
+# ============================================================
+
+@router.get(
+    "/health",
+    status_code=(
+        status.HTTP_200_OK
+    ),
+)
+def voice_health() -> dict[
+    str,
+    str,
+]:
+    return {
+        "status":
+            "ok",
+
+        "service":
+            "harbor-voice",
+    }
+
+
+# ============================================================
 # SEARCH HARBOR KNOWLEDGE
 # ============================================================
 
@@ -149,24 +221,8 @@ def search_support_knowledge(
     payload: VoiceKnowledgeRequest,
 ) -> VoiceKnowledgeResponse:
     """
-    Search Harbor's existing support knowledge base.
-
-    Architecture:
-
-        Retell
-           ↓
-        Harbor voice API
-           ↓
-        Existing Harbor RAG
-           ↓
-        MiniLM / pgvector
-           ↓
-        Groq grounded answer
-           ↓
-        Voice-friendly result
-
-    The web interface and voice interface therefore use the
-    same company knowledge source.
+    Search Harbor's existing RAG knowledge base for a Retell
+    voice caller.
     """
 
     try:
@@ -203,11 +259,20 @@ def search_support_knowledge(
             ),
         )
 
-        return VoiceKnowledgeResponse(
-            success=True,
-            answer=result.answer,
-            grounded=result.grounded,
-            sources=sources,
+        return (
+            VoiceKnowledgeResponse(
+                success=True,
+
+                answer=(
+                    result.answer
+                ),
+
+                grounded=(
+                    result.grounded
+                ),
+
+                sources=sources,
+            )
         )
 
     except (
@@ -218,6 +283,7 @@ def search_support_knowledge(
             status_code=(
                 status.HTTP_400_BAD_REQUEST
             ),
+
             detail=str(
                 exc
             ),
@@ -225,35 +291,190 @@ def search_support_knowledge(
 
     except Exception as exc:
         logger.exception(
-            "Voice knowledge search failed."
+            (
+                "Voice knowledge "
+                "search failed."
+            )
         )
 
         raise HTTPException(
             status_code=(
                 status.HTTP_500_INTERNAL_SERVER_ERROR
             ),
+
             detail=(
-                "Harbor could not search the "
-                "support knowledge base."
+                "Harbor could not search "
+                "the support knowledge base."
             ),
         ) from exc
 
 
 # ============================================================
-# HEALTH / INTEGRATION TEST
+# CREATE SUPPORT TICKET
 # ============================================================
 
-@router.get(
-    "/health",
-    status_code=status.HTTP_200_OK,
+@router.post(
+    "/create-ticket",
+    response_model=(
+        VoiceTicketResponse
+    ),
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
 )
-def voice_health() -> dict[str, str]:
+def create_support_ticket(
+    payload: VoiceTicketRequest,
+) -> VoiceTicketResponse:
     """
-    Small endpoint for verifying that Harbor's voice API
-    router is registered correctly.
+    Create a customer-confirmed support ticket from Retell.
+
+    Important:
+
+    This endpoint creates only Harbor's internal
+    pending-approval ticket.
+
+    It cannot approve or execute the customer's requested
+    action.
     """
 
-    return {
-        "status": "ok",
-        "service": "harbor-voice",
-    }
+    try:
+        ticket = (
+            create_voice_support_ticket(
+                customer_email=(
+                    payload
+                    .customer_email
+                ),
+
+                issue=(
+                    payload.issue
+                ),
+
+                call_id=(
+                    payload.call_id
+                ),
+
+                confirmed=(
+                    payload.confirmed
+                ),
+
+                severity=(
+                    payload.severity
+                ),
+            )
+        )
+
+
+        return (
+            VoiceTicketResponse(
+                success=True,
+
+                ticket_id=str(
+                    ticket[
+                        "id"
+                    ]
+                ),
+
+                status=str(
+                    ticket.get(
+                        "status",
+                        "pending_approval",
+                    )
+                ),
+
+                approval_status=str(
+                    ticket.get(
+                        "approval_status",
+                        "pending",
+                    )
+                ),
+
+                severity=str(
+                    ticket.get(
+                        "severity",
+                        "medium",
+                    )
+                ),
+
+                message=(
+                    "Your support ticket has "
+                    "been created and sent to "
+                    "a Harbor support agent "
+                    "for review."
+                ),
+            )
+        )
+
+
+    except (
+        VoiceCustomerNotFoundError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+    except (
+        VoiceTicketConfirmationRequiredError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+    except (
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+    except VoiceTicketCreationError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+    except Exception as exc:
+        logger.exception(
+            (
+                "Unexpected voice ticket "
+                "creation failure."
+            )
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+
+            detail=(
+                "Harbor could not create "
+                "the support ticket."
+            ),
+        ) from exc
