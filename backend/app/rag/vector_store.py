@@ -16,6 +16,20 @@ from app.schemas.document import (
 
 
 # ============================================================
+# CONSTANTS
+# ============================================================
+
+PUBLIC_VISIBILITY = "public"
+
+STAFF_ONLY_VISIBILITY = "staff_only"
+
+ALLOWED_VISIBILITIES = {
+    PUBLIC_VISIBILITY,
+    STAFF_ONLY_VISIBILITY,
+}
+
+
+# ============================================================
 # HELPERS
 # ============================================================
 
@@ -49,6 +63,55 @@ def _clean_required_string(
         )
 
     return value
+
+
+def _normalize_visibility(
+    visibility: str,
+) -> str:
+    visibility = (
+        _clean_required_string(
+            visibility,
+            "visibility",
+        )
+        .lower()
+    )
+
+    if (
+        visibility
+        not in ALLOWED_VISIBILITIES
+    ):
+        raise ValueError(
+            (
+                "visibility must be either "
+                "'public' or 'staff_only'."
+            )
+        )
+
+    return visibility
+
+
+def _normalize_requester_role(
+    requester_role: str,
+) -> str:
+    if not isinstance(
+        requester_role,
+        str,
+    ):
+        return "customer"
+
+    requester_role = (
+        requester_role
+        .strip()
+        .lower()
+    )
+
+    if requester_role in {
+        "support_agent",
+        "admin",
+    }:
+        return requester_role
+
+    return "customer"
 
 
 # ============================================================
@@ -188,6 +251,7 @@ def list_knowledge_documents(
     *,
     logical_key: str | None = None,
     active_only: bool = False,
+    visibility: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     if limit <= 0:
@@ -222,6 +286,16 @@ def list_knowledge_documents(
             query.eq(
                 "is_active",
                 True,
+            )
+        )
+
+    if visibility:
+        query = (
+            query.eq(
+                "visibility",
+                _normalize_visibility(
+                    visibility
+                ),
             )
         )
 
@@ -339,7 +413,9 @@ def activate_document(
         )
 
     deactivate_documents(
-        logical_key=logical_key
+        logical_key=(
+            logical_key
+        )
     )
 
     updated = (
@@ -391,6 +467,7 @@ def create_document(
     effective_date: date | str | None = None,
     uploaded_by: str | None = None,
     is_active: bool = True,
+    visibility: str = "public",
 ) -> str:
     source_name = (
         _clean_required_string(
@@ -453,6 +530,12 @@ def create_document(
         )
     )
 
+    visibility = (
+        _normalize_visibility(
+            visibility
+        )
+    )
+
     if isinstance(
         effective_date,
         date,
@@ -460,6 +543,7 @@ def create_document(
         effective_date_value = (
             effective_date.isoformat()
         )
+
     else:
         effective_date_value = (
             effective_date
@@ -519,6 +603,9 @@ def create_document(
 
         "uploaded_by":
             uploaded_by,
+
+        "visibility":
+            visibility,
     }
 
     response = (
@@ -681,9 +768,7 @@ def insert_chunks(
             }
         )
 
-    batch_size = (
-        100
-    )
+    batch_size = 100
 
     for start in range(
         0,
@@ -715,12 +800,13 @@ def similarity_search(
     query_embedding: list[float],
     match_threshold: float = 0.35,
     match_count: int = 10,
-) -> list[
-    dict[str, Any]
-]:
-    """
-    Semantic vector search over active Harbor documents.
-    """
+    requester_role: str = "customer",
+) -> list[dict[str, Any]]:
+    requester_role = (
+        _normalize_requester_role(
+            requester_role
+        )
+    )
 
     supabase = (
         get_supabase_client()
@@ -739,6 +825,9 @@ def similarity_search(
 
                 "match_count":
                     match_count,
+
+                "requester_role":
+                    requester_role,
             },
         )
         .execute()
@@ -757,17 +846,18 @@ def similarity_search(
 def keyword_search(
     query: str,
     match_count: int = 10,
-) -> list[
-    dict[str, Any]
-]:
-    """
-    PostgreSQL full-text search over active Harbor documents.
-    """
-
+    requester_role: str = "customer",
+) -> list[dict[str, Any]]:
     query = (
         _clean_required_string(
             query,
             "query",
+        )
+    )
+
+    requester_role = (
+        _normalize_requester_role(
+            requester_role
         )
     )
 
@@ -785,6 +875,9 @@ def keyword_search(
 
                 "match_count":
                     match_count,
+
+                "requester_role":
+                    requester_role,
             },
         )
         .execute()

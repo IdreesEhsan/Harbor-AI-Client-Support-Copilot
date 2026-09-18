@@ -14,13 +14,38 @@ from app.schemas.rag import (
 )
 
 
-# ============================================================
-# HYBRID SEARCH WEIGHTS
-# ============================================================
-
 VECTOR_WEIGHT = 0.70
 
 KEYWORD_WEIGHT = 0.30
+
+
+# ============================================================
+# ROLE
+# ============================================================
+
+def _normalize_requester_role(
+    requester_role: str,
+) -> str:
+    if (
+        isinstance(
+            requester_role,
+            str,
+        )
+        and requester_role
+        .strip()
+        .lower()
+        in {
+            "support_agent",
+            "admin",
+        }
+    ):
+        return (
+            requester_role
+            .strip()
+            .lower()
+        )
+
+    return "customer"
 
 
 # ============================================================
@@ -32,14 +57,6 @@ def _normalize_keyword_scores(
         dict[str, Any]
     ],
 ) -> dict[str, float]:
-    """
-    Normalize PostgreSQL keyword scores into approximately
-    the 0..1 range.
-
-    pgvector cosine similarity already behaves like a
-    normalized relevance signal for Harbor.
-    """
-
     if not rows:
         return {}
 
@@ -50,6 +67,7 @@ def _normalize_keyword_scores(
                 0.0,
             )
         )
+
         for row
         in rows
     )
@@ -59,6 +77,7 @@ def _normalize_keyword_scores(
             str(
                 row["id"]
             ): 0.0
+
             for row
             in rows
         }
@@ -67,13 +86,15 @@ def _normalize_keyword_scores(
         str(
             row["id"]
         ):
-            float(
-                row.get(
-                    "keyword_score",
-                    0.0,
+            (
+                float(
+                    row.get(
+                        "keyword_score",
+                        0.0,
+                    )
                 )
+                / max_score
             )
-            / max_score
 
         for row
         in rows
@@ -96,14 +117,6 @@ def _rerank_candidates(
 ) -> list[
     dict[str, Any]
 ]:
-    """
-    Merge semantic and lexical candidates and calculate a
-    deterministic hybrid relevance score.
-
-    A chunk appearing in both result sets receives signals
-    from both retrieval methods.
-    """
-
     keyword_scores = (
         _normalize_keyword_scores(
             keyword_rows
@@ -115,10 +128,6 @@ def _rerank_candidates(
         dict[str, Any]
     ] = {}
 
-
-    # --------------------------------------------------------
-    # Vector candidates
-    # --------------------------------------------------------
 
     for row in vector_rows:
         chunk_id = str(
@@ -144,10 +153,6 @@ def _rerank_candidates(
                 0.0,
         }
 
-
-    # --------------------------------------------------------
-    # Keyword candidates
-    # --------------------------------------------------------
 
     for row in keyword_rows:
         chunk_id = str(
@@ -185,10 +190,6 @@ def _rerank_candidates(
                     normalized_keyword_score,
             }
 
-
-    # --------------------------------------------------------
-    # Hybrid reranking
-    # --------------------------------------------------------
 
     ranked: list[
         dict[str, Any]
@@ -305,20 +306,10 @@ def retrieve_chunks(
     question: str,
     match_threshold: float = 0.35,
     match_count: int = 5,
+    requester_role: str = "customer",
 ) -> list[
     RetrievedChunk
 ]:
-    """
-    Hybrid Harbor retrieval.
-
-    1. Embed user question.
-    2. Retrieve semantic candidates.
-    3. Retrieve keyword candidates.
-    4. Merge duplicate chunks.
-    5. Rerank using semantic + lexical relevance.
-    6. Return strongest evidence to the existing RAG pipeline.
-    """
-
     question = (
         question.strip()
     )
@@ -328,24 +319,24 @@ def retrieve_chunks(
             "Question cannot be empty."
         )
 
+    requester_role = (
+        _normalize_requester_role(
+            requester_role
+        )
+    )
 
-    # Retrieve more candidates than the final context size so
-    # the reranker has meaningful options.
     candidate_count = max(
         match_count * 2,
         10,
     )
 
 
-    # --------------------------------------------------------
-    # Semantic retrieval
-    # --------------------------------------------------------
-
     query_embedding = (
         embed_query(
             question
         )
     )
+
 
     vector_rows = (
         similarity_search(
@@ -360,27 +351,28 @@ def retrieve_chunks(
             match_count=(
                 candidate_count
             ),
-        )
-    )
 
-
-    # --------------------------------------------------------
-    # Keyword retrieval
-    # --------------------------------------------------------
-
-    keyword_rows = (
-        keyword_search(
-            query=question,
-            match_count=(
-                candidate_count
+            requester_role=(
+                requester_role
             ),
         )
     )
 
 
-    # --------------------------------------------------------
-    # Merge + rerank
-    # --------------------------------------------------------
+    keyword_rows = (
+        keyword_search(
+            query=question,
+
+            match_count=(
+                candidate_count
+            ),
+
+            requester_role=(
+                requester_role
+            ),
+        )
+    )
+
 
     rows = (
         _rerank_candidates(

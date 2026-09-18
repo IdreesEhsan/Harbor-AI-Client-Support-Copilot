@@ -4,6 +4,11 @@ from app.rag.analytics import (
     record_rag_query,
 )
 
+from app.rag.conflict_detector import (
+    detect_policy_conflict,
+    record_policy_conflict,
+)
+
 from app.rag.context import (
     build_context,
 )
@@ -37,9 +42,42 @@ NO_ANSWER_MESSAGE = (
 )
 
 
+CONFLICT_MESSAGE = (
+    "I found conflicting information in Harbor's active "
+    "knowledge base, so I can't provide a reliable answer "
+    "to that question yet. A Harbor support agent should "
+    "review the conflicting policies."
+)
+
+
 # ============================================================
 # HELPERS
 # ============================================================
+
+def _normalize_requester_role(
+    requester_role: str,
+) -> str:
+    if (
+        isinstance(
+            requester_role,
+            str,
+        )
+        and requester_role
+        .strip()
+        .lower()
+        in {
+            "support_agent",
+            "admin",
+        }
+    ):
+        return (
+            requester_role
+            .strip()
+            .lower()
+        )
+
+    return "customer"
+
 
 def _unique_sources(
     chunks,
@@ -72,9 +110,39 @@ def _top_similarity(
         float(
             chunk.similarity
         )
+
         for chunk
         in chunks
     )
+
+
+def _build_citations(
+    chunks,
+) -> list[
+    Citation
+]:
+    return [
+        Citation(
+            source=(
+                chunk.source_name
+            ),
+
+            chunk_index=(
+                chunk.chunk_index
+            ),
+
+            similarity=(
+                chunk.similarity
+            ),
+
+            metadata=(
+                chunk.metadata
+            ),
+        )
+
+        for chunk
+        in chunks
+    ]
 
 
 # ============================================================
@@ -85,32 +153,8 @@ def answer_question(
     question: str,
     match_threshold: float = 0.35,
     match_count: int = 5,
+    requester_role: str = "customer",
 ) -> RAGResponse:
-    """
-    Harbor grounded RAG pipeline.
-
-    Flow:
-
-        customer question
-              ↓
-        retrieval query rewrite
-              ↓
-        hybrid search + reranking
-              ↓
-        evidence check
-          ┌──────────────┐
-          ↓              ↓
-        found          no evidence
-          ↓              ↓
-        context        no-answer
-          ↓              ↓
-        Groq           gap log
-          ↓
-        citations
-          ↓
-        analytics
-    """
-
     if not isinstance(
         question,
         str,
@@ -129,8 +173,15 @@ def answer_question(
         )
 
 
+    requester_role = (
+        _normalize_requester_role(
+            requester_role
+        )
+    )
+
+
     # --------------------------------------------------------
-    # 1. Rewrite only the retrieval query
+    # 1. Retrieval query rewriting
     # --------------------------------------------------------
 
     retrieval_query = (
@@ -141,7 +192,7 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # 2. Hybrid retrieval
+    # 2. Role-aware hybrid retrieval
     # --------------------------------------------------------
 
     chunks = (
@@ -157,12 +208,16 @@ def answer_question(
             match_count=(
                 match_count
             ),
+
+            requester_role=(
+                requester_role
+            ),
         )
     )
 
 
     # --------------------------------------------------------
-    # 3. Knowledge-gap detection
+    # 3. Knowledge gap
     # --------------------------------------------------------
 
     if not chunks:
@@ -208,7 +263,108 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # 4. Build grounded context
+    # 4. Conflict detection
+    # --------------------------------------------------------
+
+    conflict = (
+        detect_policy_conflict(
+            question=(
+                original_question
+            ),
+
+            chunks=chunks,
+        )
+    )
+
+
+    if conflict.detected:
+        record_policy_conflict(
+            question=(
+                original_question
+            ),
+
+            requester_role=(
+                requester_role
+            ),
+
+            result=(
+                conflict
+            ),
+        )
+
+
+        record_rag_query(
+            original_query=(
+                original_question
+            ),
+
+            rewritten_query=(
+                retrieval_query
+            ),
+
+            grounded=False,
+
+            retrieved_chunks=(
+                len(chunks)
+            ),
+
+            top_similarity=(
+                _top_similarity(
+                    chunks
+                )
+            ),
+
+            knowledge_gap=True,
+
+            gap_reason=(
+                "Conflicting active knowledge "
+                "was retrieved."
+            ),
+
+            source_names=(
+                _unique_sources(
+                    chunks
+                )
+            ),
+        )
+
+
+        logger.warning(
+            (
+                "RAG conflict detected | "
+                "role=%s | "
+                "sources=%s | "
+                "reason=%s"
+            ),
+            requester_role,
+            conflict.source_names,
+            conflict.reason,
+        )
+
+
+        return (
+            RAGResponse(
+                answer=(
+                    CONFLICT_MESSAGE
+                ),
+
+                grounded=False,
+
+                citations=(
+                    _build_citations(
+                        chunks
+                    )
+                ),
+
+                retrieved_chunks=(
+                    len(chunks)
+                ),
+            )
+        )
+
+
+    # --------------------------------------------------------
+    # 5. Build context
     # --------------------------------------------------------
 
     context = (
@@ -219,7 +375,7 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # 5. Generate answer using ORIGINAL question
+    # 6. Grounded answer
     # --------------------------------------------------------
 
     answer = (
@@ -235,37 +391,12 @@ def answer_question(
     )
 
 
-    # --------------------------------------------------------
-    # 6. Citations
-    # --------------------------------------------------------
-
-    citations = [
-        Citation(
-            source=(
-                chunk.source_name
-            ),
-
-            chunk_index=(
-                chunk.chunk_index
-            ),
-
-            similarity=(
-                chunk.similarity
-            ),
-
-            metadata=(
-                chunk.metadata
-            ),
+    citations = (
+        _build_citations(
+            chunks
         )
+    )
 
-        for chunk
-        in chunks
-    ]
-
-
-    # --------------------------------------------------------
-    # 7. Successful-query analytics
-    # --------------------------------------------------------
 
     sources = (
         _unique_sources(
@@ -273,6 +404,10 @@ def answer_question(
         )
     )
 
+
+    # --------------------------------------------------------
+    # 7. Analytics
+    # --------------------------------------------------------
 
     record_rag_query(
         original_query=(
@@ -308,11 +443,13 @@ def answer_question(
     logger.info(
         (
             "RAG request completed | "
+            "role=%s | "
             "rewritten=%s | "
             "grounded=true | "
             "chunks=%s | "
             "top_similarity=%s"
         ),
+        requester_role,
         (
             retrieval_query
             != original_question

@@ -32,15 +32,15 @@ from app.rag.vector_store import (
 )
 
 
+ALLOWED_VISIBILITIES = {
+    "public",
+    "staff_only",
+}
+
+
 def _default_logical_key(
     file_path: Path,
 ) -> str:
-    """
-    Default stable knowledge identity.
-
-    Explicit logical_key is preferable for versioned policies.
-    """
-
     return (
         file_path
         .stem
@@ -65,24 +65,14 @@ def index_document(
     version: str = "1.0",
     effective_date: date | str | None = None,
     uploaded_by: str | None = None,
+    visibility: str = "public",
 ) -> dict[str, Any]:
-    """
-    Index a new immutable version of one knowledge document.
-
-    Behavior:
-
-    1. Load + clean document.
-    2. Calculate content hash.
-    3. Detect duplicate content.
-    4. Chunk and embed only if needed.
-    5. Preserve previous document versions.
-    6. Deactivate the previous active version.
-    7. Store the new version as active.
-    """
-
-    file_path = Path(
-        file_path
+    file_path = (
+        Path(
+            file_path
+        )
     )
+
 
     resolved_logical_key = (
         logical_key
@@ -102,10 +92,38 @@ def index_document(
             "logical_key cannot be empty."
         )
 
+
     resolved_title = (
         title
         or file_path.stem
     )
+
+
+    category = (
+        category
+        .strip()
+        .lower()
+    )
+
+
+    visibility = (
+        visibility
+        .strip()
+        .lower()
+    )
+
+
+    if (
+        visibility
+        not in ALLOWED_VISIBILITIES
+    ):
+        raise ValueError(
+            (
+                "visibility must be either "
+                "'public' or 'staff_only'."
+            )
+        )
+
 
     document = (
         load_document(
@@ -113,11 +131,13 @@ def index_document(
         )
     )
 
+
     document.content = (
         clean_text(
             document.content
         )
     )
+
 
     if not document.content:
         raise ValueError(
@@ -127,6 +147,7 @@ def index_document(
             )
         )
 
+
     content_hash = (
         calculate_content_hash(
             document.content
@@ -134,20 +155,18 @@ def index_document(
     )
 
 
-    # ========================================================
-    # Duplicate-content detection
-    # ========================================================
-
     duplicate = (
         get_document_by_content_hash(
             logical_key=(
                 resolved_logical_key
             ),
+
             content_hash=(
                 content_hash
             ),
         )
     )
+
 
     if duplicate is not None:
         if not duplicate.get(
@@ -162,6 +181,7 @@ def index_document(
                     )
                 )
             )
+
 
         return {
             "source":
@@ -191,14 +211,16 @@ def index_document(
                     "version"
                 ),
 
+            "visibility":
+                duplicate.get(
+                    "visibility",
+                    "public",
+                ),
+
             "is_active":
                 True,
         }
 
-
-    # ========================================================
-    # Existing active version
-    # ========================================================
 
     previous_active = (
         get_active_document_by_logical_key(
@@ -206,10 +228,6 @@ def index_document(
         )
     )
 
-
-    # ========================================================
-    # Chunk document
-    # ========================================================
 
     version_metadata = {
         **(
@@ -229,6 +247,9 @@ def index_document(
         "version":
             version,
 
+        "visibility":
+            visibility,
+
         "effective_date":
             (
                 effective_date.isoformat()
@@ -240,18 +261,28 @@ def index_document(
             ),
     }
 
+
     document.metadata = (
         version_metadata
     )
 
+
     chunks = (
         chunk_document(
             document=document,
+
             strategy=strategy,
-            chunk_size=chunk_size,
-            overlap=overlap,
+
+            chunk_size=(
+                chunk_size
+            ),
+
+            overlap=(
+                overlap
+            ),
         )
     )
+
 
     if not chunks:
         raise ValueError(
@@ -262,15 +293,13 @@ def index_document(
         )
 
 
-    # ========================================================
-    # Embeddings
-    # ========================================================
-
     texts = [
         chunk.content
+
         for chunk
         in chunks
     ]
+
 
     embeddings = (
         embed_texts(
@@ -278,10 +307,6 @@ def index_document(
         )
     )
 
-
-    # ========================================================
-    # Create immutable version
-    # ========================================================
 
     document_id = (
         create_document(
@@ -326,20 +351,26 @@ def index_document(
             ),
 
             is_active=True,
+
+            visibility=(
+                visibility
+            ),
         )
     )
 
-
-    # ========================================================
-    # Store chunks
-    # ========================================================
 
     insert_chunks(
         document_id=(
             document_id
         ),
-        chunks=chunks,
-        embeddings=embeddings,
+
+        chunks=(
+            chunks
+        ),
+
+        embeddings=(
+            embeddings
+        ),
     )
 
 
@@ -365,6 +396,9 @@ def index_document(
         "version":
             version,
 
+        "visibility":
+            visibility,
+
         "effective_date":
             (
                 effective_date.isoformat()
@@ -385,7 +419,9 @@ def index_document(
                         "id"
                     ]
                 )
+
                 if previous_active
+
                 else None
             ),
 
