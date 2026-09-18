@@ -18,11 +18,17 @@ from app.dependencies.auth import (
     get_current_user,
 )
 
+from app.rag.analytics import (
+    create_rag_feedback,
+)
+
 from app.rag.service import (
     answer_question,
 )
 
 from app.schemas.rag import (
+    RAGFeedbackRequest,
+    RAGFeedbackResponse,
     RAGRequest,
     RAGResponse,
 )
@@ -35,14 +41,20 @@ settings = (
 
 router = APIRouter(
     prefix="/rag",
+
     tags=[
         "RAG",
     ],
 )
 
 
+# ============================================================
+# ASK
+# ============================================================
+
 @router.post(
     "/ask",
+
     response_model=(
         RAGResponse
     ),
@@ -65,6 +77,7 @@ def ask_knowledge_base(
             .question
             .strip()
         )
+
 
         if not question:
             raise HTTPException(
@@ -138,5 +151,91 @@ def ask_knowledge_base(
             detail=(
                 "Unable to process the "
                 "knowledge-base question."
+            ),
+        ) from exc
+
+
+# ============================================================
+# FEEDBACK
+# ============================================================
+
+@router.post(
+    "/feedback",
+
+    response_model=(
+        RAGFeedbackResponse
+    ),
+
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
+)
+def submit_rag_feedback(
+    payload: RAGFeedbackRequest,
+
+    current_user: dict = Depends(
+        get_current_user
+    ),
+):
+    try:
+        record = (
+            create_rag_feedback(
+                user_id=str(
+                    current_user[
+                        "id"
+                    ]
+                ),
+
+                question=(
+                    payload.question
+                ),
+
+                answer=(
+                    payload.answer
+                ),
+
+                rating=(
+                    payload.rating
+                ),
+
+                comment=(
+                    payload.comment
+                ),
+
+                source_names=(
+                    payload.source_names
+                ),
+            )
+        )
+
+
+        return (
+            RAGFeedbackResponse(
+                id=str(
+                    record[
+                        "id"
+                    ]
+                ),
+
+                rating=str(
+                    record[
+                        "rating"
+                    ]
+                ),
+
+                message=(
+                    "Thank you. Your feedback "
+                    "has been recorded."
+                ),
+            )
+        )
+
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+
+            detail=str(
+                exc
             ),
         ) from exc

@@ -27,10 +27,9 @@ def record_rag_query(
     source_names: list[str],
 ) -> None:
     """
-    Persist lightweight RAG analytics.
+    Persist lightweight production RAG analytics.
 
-    Analytics failures must never prevent Harbor from answering
-    the customer.
+    Analytics failures never prevent a customer response.
     """
 
     try:
@@ -67,7 +66,6 @@ def record_rag_query(
                 source_names,
         }
 
-
         (
             client
             .table(
@@ -79,7 +77,6 @@ def record_rag_query(
             .execute()
         )
 
-
     except Exception:
         logger.exception(
             (
@@ -90,7 +87,7 @@ def record_rag_query(
 
 
 # ============================================================
-# STAFF ANALYTICS
+# KNOWLEDGE GAPS
 # ============================================================
 
 def list_knowledge_gaps(
@@ -113,13 +110,141 @@ def list_knowledge_gaps(
         .table(
             "rag_query_analytics"
         )
-        .select(
-            "*"
-        )
+        .select("*")
         .eq(
             "knowledge_gap",
             True,
         )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(limit)
+        .execute()
+    )
+
+    return (
+        response.data
+        or []
+    )
+
+
+# ============================================================
+# FEEDBACK
+# ============================================================
+
+def create_rag_feedback(
+    *,
+    user_id: str,
+    question: str,
+    answer: str,
+    rating: str,
+    comment: str | None,
+    source_names: list[str],
+) -> dict[str, Any]:
+    if rating not in {
+        "positive",
+        "negative",
+    }:
+        raise ValueError(
+            "Unsupported RAG feedback rating."
+        )
+
+    client = (
+        get_supabase_client()
+    )
+
+    response = (
+        client
+        .table(
+            "rag_feedback"
+        )
+        .insert(
+            {
+                "user_id":
+                    user_id,
+
+                "question":
+                    question.strip(),
+
+                "answer":
+                    answer.strip(),
+
+                "rating":
+                    rating,
+
+                "comment":
+                    (
+                        comment.strip()
+                        if comment
+                        else None
+                    ),
+
+                "source_names":
+                    source_names,
+            }
+        )
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError(
+            "Could not save RAG feedback."
+        )
+
+    return (
+        response.data[0]
+    )
+
+
+def list_rag_feedback(
+    *,
+    rating: str | None = None,
+    limit: int = 100,
+) -> list[
+    dict[str, Any]
+]:
+    if limit <= 0:
+        raise ValueError(
+            "limit must be greater than zero."
+        )
+
+    if (
+        rating is not None
+        and rating not in {
+            "positive",
+            "negative",
+        }
+    ):
+        raise ValueError(
+            (
+                "rating must be positive "
+                "or negative."
+            )
+        )
+
+    client = (
+        get_supabase_client()
+    )
+
+    query = (
+        client
+        .table(
+            "rag_feedback"
+        )
+        .select("*")
+    )
+
+    if rating:
+        query = (
+            query.eq(
+                "rating",
+                rating,
+            )
+        )
+
+    response = (
+        query
         .order(
             "created_at",
             desc=True,
@@ -136,19 +261,20 @@ def list_knowledge_gaps(
     )
 
 
+# ============================================================
+# DASHBOARD SUMMARY
+# ============================================================
+
 def get_rag_analytics_summary() -> dict[
     str,
     Any
 ]:
-    """
-    Small dashboard-ready summary.
-    """
-
     client = (
         get_supabase_client()
     )
 
-    response = (
+
+    query_response = (
         client
         .table(
             "rag_query_analytics"
@@ -163,14 +289,35 @@ def get_rag_analytics_summary() -> dict[
         .execute()
     )
 
+
+    feedback_response = (
+        client
+        .table(
+            "rag_feedback"
+        )
+        .select(
+            "rating"
+        )
+        .execute()
+    )
+
+
     rows = (
-        response.data
+        query_response.data
         or []
     )
+
+
+    feedback_rows = (
+        feedback_response.data
+        or []
+    )
+
 
     total = (
         len(rows)
     )
+
 
     grounded_count = sum(
         1
@@ -181,6 +328,7 @@ def get_rag_analytics_summary() -> dict[
         )
     )
 
+
     gap_count = sum(
         1
         for row
@@ -189,6 +337,7 @@ def get_rag_analytics_summary() -> dict[
             "knowledge_gap"
         )
     )
+
 
     average_chunks = (
         sum(
@@ -202,8 +351,36 @@ def get_rag_analytics_summary() -> dict[
             in rows
         )
         / total
+
         if total
         else 0.0
+    )
+
+
+    positive_feedback = sum(
+        1
+        for row
+        in feedback_rows
+        if row.get(
+            "rating"
+        ) == "positive"
+    )
+
+
+    negative_feedback = sum(
+        1
+        for row
+        in feedback_rows
+        if row.get(
+            "rating"
+        ) == "negative"
+    )
+
+
+    total_feedback = (
+        len(
+            feedback_rows
+        )
     )
 
 
@@ -243,5 +420,25 @@ def get_rag_analytics_summary() -> dict[
             round(
                 average_chunks,
                 2,
+            ),
+
+        "total_feedback":
+            total_feedback,
+
+        "positive_feedback":
+            positive_feedback,
+
+        "negative_feedback":
+            negative_feedback,
+
+        "positive_feedback_rate":
+            (
+                round(
+                    positive_feedback
+                    / total_feedback,
+                    4,
+                )
+                if total_feedback
+                else 0.0
             ),
     }
