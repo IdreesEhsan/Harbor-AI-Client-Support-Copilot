@@ -7,8 +7,12 @@ import {
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
+
 import ChatPage from "./pages/ChatPage";
+
 import StaffPage from "./pages/StaffPage";
+import KnowledgePage from "./pages/KnowledgePage";
+import RagQualityPage from "./pages/RagQualityPage";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
 import StaffRoute from "./routes/StaffRoute";
@@ -95,7 +99,9 @@ export default function App() {
         path="/chat"
         element={
           <ProtectedRoute>
+
             <ChatPage />
+
           </ProtectedRoute>
         }
       />
@@ -105,7 +111,33 @@ export default function App() {
         path="/staff"
         element={
           <StaffRoute>
+
             <StaffPage />
+
+          </StaffRoute>
+        }
+      />
+
+
+      <Route
+        path="/staff/knowledge"
+        element={
+          <StaffRoute>
+
+            <KnowledgePage />
+
+          </StaffRoute>
+        }
+      />
+
+
+      <Route
+        path="/staff/rag-quality"
+        element={
+          <StaffRoute>
+
+            <RagQualityPage />
+
           </StaffRoute>
         }
       />
@@ -117,10 +149,13 @@ export default function App() {
           user
             ? (
               <Navigate
-                to={homePath}
+                to={
+                  homePath
+                }
                 replace
               />
             )
+
             : (
               <Navigate
                 to="/login"

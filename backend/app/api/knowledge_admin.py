@@ -19,19 +19,9 @@ from fastapi.concurrency import (
     run_in_threadpool,
 )
 
-
-# ============================================================
-# AUTH
-# ============================================================
-
 from app.dependencies.auth import (
     require_roles,
 )
-
-
-# ============================================================
-# ANALYTICS / FEEDBACK
-# ============================================================
 
 from app.rag.analytics import (
     get_rag_analytics_summary,
@@ -39,19 +29,9 @@ from app.rag.analytics import (
     list_rag_feedback,
 )
 
-
-# ============================================================
-# CONFLICT DETECTION
-# ============================================================
-
 from app.rag.conflict_detector import (
     list_policy_conflicts,
 )
-
-
-# ============================================================
-# AUTOMATED EVALUATION
-# ============================================================
 
 from app.rag.evaluation import (
     create_evaluation_case,
@@ -60,29 +40,16 @@ from app.rag.evaluation import (
     run_rag_evaluation,
 )
 
-
-# ============================================================
-# KNOWLEDGE INGESTION
-# ============================================================
-
 from app.rag.indexer import (
     index_document,
 )
 
-
-# ============================================================
-# KNOWLEDGE STORAGE
-# ============================================================
-
 from app.rag.vector_store import (
     activate_document,
+    deactivate_document,
+    delete_document,
     list_knowledge_documents,
 )
-
-
-# ============================================================
-# SCHEMAS
-# ============================================================
 
 from app.schemas.rag import (
     RAGEvaluationCaseCreate,
@@ -90,10 +57,6 @@ from app.schemas.rag import (
     RAGEvaluationRunResponse,
 )
 
-
-# ============================================================
-# ROUTER
-# ============================================================
 
 router = APIRouter(
     prefix="/knowledge",
@@ -122,7 +85,7 @@ ALLOWED_VISIBILITIES = {
 
 
 # ============================================================
-# LIST KNOWLEDGE DOCUMENTS
+# LIST DOCUMENTS
 # ============================================================
 
 @router.get(
@@ -142,16 +105,6 @@ def get_documents(
         )
     ),
 ):
-    """
-    List Harbor knowledge documents.
-
-    Staff may optionally filter by:
-
-    - active/inactive state
-    - logical policy key
-    - visibility
-    """
-
     try:
         return (
             list_knowledge_documents(
@@ -184,7 +137,7 @@ def get_documents(
 
 
 # ============================================================
-# UPLOAD NEW KNOWLEDGE VERSION
+# UPLOAD NEW DOCUMENT VERSION
 # ============================================================
 
 @router.post(
@@ -222,24 +175,10 @@ async def upload_document_version(
         )
     ),
 ):
-    """
-    Upload and index a new Harbor knowledge-document version.
-
-    Existing versions are preserved.
-
-    The new version becomes active and the previous active
-    version for the same logical key becomes inactive.
-    """
-
-    # --------------------------------------------------------
-    # Filename validation
-    # --------------------------------------------------------
-
     filename = (
         file.filename
         or ""
     ).strip()
-
 
     if not filename:
         raise HTTPException(
@@ -253,11 +192,6 @@ async def upload_document_version(
             ),
         )
 
-
-    # --------------------------------------------------------
-    # Extension validation
-    # --------------------------------------------------------
-
     suffix = (
         Path(
             filename
@@ -265,7 +199,6 @@ async def upload_document_version(
         .suffix
         .lower()
     )
-
 
     if (
         suffix
@@ -282,22 +215,15 @@ async def upload_document_version(
             ),
         )
 
-
-    # --------------------------------------------------------
-    # Normalize metadata
-    # --------------------------------------------------------
-
     logical_key = (
         logical_key
         .strip()
         .lower()
     )
 
-
     title = (
         title.strip()
     )
-
 
     category = (
         category
@@ -305,22 +231,15 @@ async def upload_document_version(
         .lower()
     )
 
-
     version = (
         version.strip()
     )
-
 
     visibility = (
         visibility
         .strip()
         .lower()
     )
-
-
-    # --------------------------------------------------------
-    # Required-field validation
-    # --------------------------------------------------------
 
     if not logical_key:
         raise HTTPException(
@@ -333,7 +252,6 @@ async def upload_document_version(
             ),
         )
 
-
     if not title:
         raise HTTPException(
             status_code=(
@@ -345,7 +263,6 @@ async def upload_document_version(
             ),
         )
 
-
     if not version:
         raise HTTPException(
             status_code=(
@@ -356,7 +273,6 @@ async def upload_document_version(
                 "version cannot be empty."
             ),
         )
-
 
     if (
         visibility
@@ -373,11 +289,6 @@ async def upload_document_version(
             ),
         )
 
-
-    # --------------------------------------------------------
-    # Temporary storage
-    # --------------------------------------------------------
-
     temp_directory = (
         Path(
             tempfile.mkdtemp(
@@ -388,23 +299,15 @@ async def upload_document_version(
         )
     )
 
-
     temp_file = (
         temp_directory
         / filename
     )
 
-
     try:
-
-        # ----------------------------------------------------
-        # Stream uploaded file to disk
-        # ----------------------------------------------------
-
         with temp_file.open(
             "wb"
         ) as destination:
-
             while True:
                 chunk = (
                     await file.read(
@@ -418,14 +321,6 @@ async def upload_document_version(
                 destination.write(
                     chunk
                 )
-
-
-        # ----------------------------------------------------
-        # Index document in threadpool
-        #
-        # Loading, embeddings and Supabase operations are
-        # blocking operations.
-        # ----------------------------------------------------
 
         result = (
             await run_in_threadpool(
@@ -465,9 +360,7 @@ async def upload_document_version(
             )
         )
 
-
         return result
-
 
     except ValueError as exc:
         raise HTTPException(
@@ -480,11 +373,8 @@ async def upload_document_version(
             ),
         ) from exc
 
-
     finally:
-
         await file.close()
-
 
         shutil.rmtree(
             temp_directory,
@@ -494,7 +384,7 @@ async def upload_document_version(
 
 
 # ============================================================
-# ACTIVATE PREVIOUS DOCUMENT VERSION
+# ACTIVATE DOCUMENT VERSION
 # ============================================================
 
 @router.post(
@@ -510,13 +400,6 @@ def activate_document_version(
         )
     ),
 ):
-    """
-    Roll Harbor back to a previous knowledge-document version.
-
-    Activating one version automatically deactivates the other
-    active version sharing the same logical key.
-    """
-
     try:
         return (
             activate_document(
@@ -539,7 +422,91 @@ def activate_document_version(
 
 
 # ============================================================
-# RAG ANALYTICS SUMMARY
+# DEACTIVATE DOCUMENT VERSION
+# ============================================================
+
+@router.post(
+    "/documents/{document_id}/deactivate",
+)
+def deactivate_document_version(
+    document_id: UUID,
+
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    try:
+        return (
+            deactivate_document(
+                str(
+                    document_id
+                )
+            )
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+# ============================================================
+# DELETE DOCUMENT VERSION
+# ============================================================
+
+@router.delete(
+    "/documents/{document_id}",
+)
+def delete_knowledge_document(
+    document_id: UUID,
+
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    """
+    Permanently remove one knowledge-document version and all
+    of its indexed chunks.
+
+    Deleting an active version intentionally does not activate
+    an older version automatically.
+    """
+
+    try:
+        return (
+            delete_document(
+                str(
+                    document_id
+                )
+            )
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+
+# ============================================================
+# RAG ANALYTICS
 # ============================================================
 
 @router.get(
@@ -553,10 +520,6 @@ def rag_analytics(
         )
     ),
 ):
-    """
-    Return dashboard-ready RAG quality and feedback metrics.
-    """
-
     return (
         get_rag_analytics_summary()
     )
@@ -579,17 +542,10 @@ def knowledge_gaps(
         )
     ),
 ):
-    """
-    List customer questions for which Harbor could not retrieve
-    sufficient verified knowledge.
-    """
-
     try:
         return (
             list_knowledge_gaps(
-                limit=(
-                    limit
-                )
+                limit=limit
             )
         )
 
@@ -622,16 +578,10 @@ def policy_conflicts(
         )
     ),
 ):
-    """
-    List policy conflicts detected during live RAG retrieval.
-    """
-
     try:
         return (
             list_policy_conflicts(
-                limit=(
-                    limit
-                )
+                limit=limit
             )
         )
 
@@ -666,15 +616,6 @@ def rag_feedback(
         )
     ),
 ):
-    """
-    Review customer/staff feedback about Harbor RAG answers.
-
-    Optional rating filter:
-
-        positive
-        negative
-    """
-
     try:
         return (
             list_rag_feedback(
@@ -701,7 +642,7 @@ def rag_feedback(
 
 
 # ============================================================
-# CREATE RAG EVALUATION CASE
+# CREATE EVALUATION CASE
 # ============================================================
 
 @router.post(
@@ -725,24 +666,6 @@ def create_rag_evaluation_case(
         )
     ),
 ):
-    """
-    Create one reusable automated RAG evaluation test case.
-
-    Example:
-
-        Question:
-            What is the refund period?
-
-        Expected answer:
-            contains "14 days"
-
-        Expected source:
-            refund_policy_v2.txt
-
-        Expected grounded:
-            true
-    """
-
     try:
         return (
             create_evaluation_case(
@@ -763,7 +686,7 @@ def create_rag_evaluation_case(
 
 
 # ============================================================
-# LIST RAG EVALUATION CASES
+# LIST EVALUATION CASES
 # ============================================================
 
 @router.get(
@@ -779,10 +702,6 @@ def get_rag_evaluation_cases(
         )
     ),
 ):
-    """
-    List automated RAG quality-test cases.
-    """
-
     return (
         list_evaluation_cases(
             active_only=(
@@ -793,7 +712,7 @@ def get_rag_evaluation_cases(
 
 
 # ============================================================
-# RUN AUTOMATED RAG EVALUATION
+# RUN RAG EVALUATION
 # ============================================================
 
 @router.post(
@@ -811,18 +730,6 @@ def execute_rag_evaluation(
         )
     ),
 ):
-    """
-    Execute all currently-active RAG evaluation cases.
-
-    Measures:
-
-    - retrieval success
-    - groundedness accuracy
-    - expected-source accuracy
-    - expected-answer accuracy
-    - overall test pass rate
-    """
-
     try:
         return (
             run_rag_evaluation(
@@ -847,7 +754,7 @@ def execute_rag_evaluation(
 
 
 # ============================================================
-# RAG EVALUATION HISTORY
+# EVALUATION HISTORY
 # ============================================================
 
 @router.get(
@@ -863,11 +770,6 @@ def get_rag_evaluation_runs(
         )
     ),
 ):
-    """
-    List previous automated RAG evaluation runs so Harbor's
-    quality can be compared over time.
-    """
-
     if limit <= 0:
         raise HTTPException(
             status_code=(
@@ -879,11 +781,8 @@ def get_rag_evaluation_runs(
             ),
         )
 
-
     return (
         list_evaluation_runs(
-            limit=(
-                limit
-            )
+            limit=limit
         )
     )

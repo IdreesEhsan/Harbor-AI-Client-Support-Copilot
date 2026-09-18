@@ -23,6 +23,7 @@ PUBLIC_VISIBILITY = "public"
 
 STAFF_ONLY_VISIBILITY = "staff_only"
 
+
 ALLOWED_VISIBILITIES = {
     PUBLIC_VISIBILITY,
     STAFF_ONLY_VISIBILITY,
@@ -156,6 +157,40 @@ def get_document_by_source(
     return response.data[0]
 
 
+def get_document_by_id(
+    document_id: str,
+) -> dict[str, Any] | None:
+    document_id = (
+        _clean_required_string(
+            document_id,
+            "document_id",
+        )
+    )
+
+    supabase = (
+        get_supabase_client()
+    )
+
+    response = (
+        supabase
+        .table(
+            "knowledge_documents"
+        )
+        .select("*")
+        .eq(
+            "id",
+            document_id,
+        )
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    return response.data[0]
+
+
 def get_active_document_by_logical_key(
     logical_key: str,
 ) -> dict[str, Any] | None:
@@ -253,7 +288,9 @@ def list_knowledge_documents(
     active_only: bool = False,
     visibility: str | None = None,
     limit: int = 100,
-) -> list[dict[str, Any]]:
+) -> list[
+    dict[str, Any]
+]:
     if limit <= 0:
         raise ValueError(
             "limit must be greater than zero."
@@ -323,6 +360,13 @@ def deactivate_documents(
     *,
     logical_key: str,
 ) -> None:
+    """
+    Deactivate every currently-active version under one
+    logical policy key.
+
+    Used internally when activating or creating a new version.
+    """
+
     logical_key = (
         _clean_required_string(
             logical_key,
@@ -361,9 +405,16 @@ def deactivate_documents(
     )
 
 
-def activate_document(
+def deactivate_document(
     document_id: str,
 ) -> dict[str, Any]:
+    """
+    Deactivate one specific knowledge-document version.
+
+    The document and chunks remain stored, but active-only RAG
+    retrieval will stop using it.
+    """
+
     document_id = (
         _clean_required_string(
             document_id,
@@ -375,28 +426,85 @@ def activate_document(
         get_supabase_client()
     )
 
+    document = (
+        get_document_by_id(
+            document_id
+        )
+    )
+
+    if document is None:
+        raise ValueError(
+            "Knowledge document was not found."
+        )
+
+    if not document.get(
+        "is_active"
+    ):
+        return document
+
     response = (
         supabase
         .table(
             "knowledge_documents"
         )
-        .select("*")
+        .update(
+            {
+                "is_active":
+                    False,
+
+                "updated_at":
+                    _utc_now(),
+            }
+        )
         .eq(
             "id",
             document_id,
         )
-        .limit(1)
         .execute()
     )
 
     if not response.data:
+        raise RuntimeError(
+            (
+                "Could not deactivate "
+                "knowledge document."
+            )
+        )
+
+    return (
+        response.data[0]
+    )
+
+
+def activate_document(
+    document_id: str,
+) -> dict[str, Any]:
+    """
+    Activate one version and deactivate any other active version
+    sharing the same logical key.
+    """
+
+    document_id = (
+        _clean_required_string(
+            document_id,
+            "document_id",
+        )
+    )
+
+    supabase = (
+        get_supabase_client()
+    )
+
+    document = (
+        get_document_by_id(
+            document_id
+        )
+    )
+
+    if document is None:
         raise ValueError(
             "Knowledge document was not found."
         )
-
-    document = (
-        response.data[0]
-    )
 
     logical_key = (
         document.get(
@@ -689,6 +797,13 @@ def update_document(
 def delete_document_chunks(
     document_id: str,
 ) -> None:
+    document_id = (
+        _clean_required_string(
+            document_id,
+            "document_id",
+        )
+    )
+
     supabase = (
         get_supabase_client()
     )
@@ -793,6 +908,104 @@ def insert_chunks(
 
 
 # ============================================================
+# DELETE DOCUMENT
+# ============================================================
+
+def delete_document(
+    document_id: str,
+) -> dict[str, Any]:
+    """
+    Permanently remove one knowledge document and all chunks.
+
+    Important:
+    deleting an active version does NOT automatically activate
+    an older version.
+    """
+
+    document_id = (
+        _clean_required_string(
+            document_id,
+            "document_id",
+        )
+    )
+
+    supabase = (
+        get_supabase_client()
+    )
+
+    document = (
+        get_document_by_id(
+            document_id
+        )
+    )
+
+    if document is None:
+        raise ValueError(
+            "Knowledge document was not found."
+        )
+
+    delete_document_chunks(
+        document_id
+    )
+
+    response = (
+        supabase
+        .table(
+            "knowledge_documents"
+        )
+        .delete()
+        .eq(
+            "id",
+            document_id,
+        )
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError(
+            (
+                "Could not delete "
+                "knowledge document."
+            )
+        )
+
+    return {
+        "id":
+            document_id,
+
+        "logical_key":
+            document.get(
+                "logical_key"
+            ),
+
+        "title":
+            document.get(
+                "title"
+            ),
+
+        "version":
+            document.get(
+                "version"
+            ),
+
+        "source_name":
+            document.get(
+                "source_name"
+            ),
+
+        "was_active":
+            bool(
+                document.get(
+                    "is_active"
+                )
+            ),
+
+        "deleted":
+            True,
+    }
+
+
+# ============================================================
 # VECTOR SEARCH
 # ============================================================
 
@@ -801,7 +1014,9 @@ def similarity_search(
     match_threshold: float = 0.35,
     match_count: int = 10,
     requester_role: str = "customer",
-) -> list[dict[str, Any]]:
+) -> list[
+    dict[str, Any]
+]:
     requester_role = (
         _normalize_requester_role(
             requester_role
@@ -847,7 +1062,9 @@ def keyword_search(
     query: str,
     match_count: int = 10,
     requester_role: str = "customer",
-) -> list[dict[str, Any]]:
+) -> list[
+    dict[str, Any]
+]:
     query = (
         _clean_required_string(
             query,

@@ -29,6 +29,8 @@ import {
   connectNotificationSocket,
 } from "../realtime/notifications";
 
+import RagFeedback from "../components/RagFeedback";
+
 import "../styles/conversation-sidebar.css";
 import "../styles/notifications.css";
 
@@ -466,6 +468,43 @@ export default function ChatPage() {
 
 
   /* =======================================================
+     FEEDBACK QUESTION LOOKUP
+     ======================================================= */
+
+  const getPreviousUserQuestion = (
+    messageIndex
+  ) => {
+    for (
+      let index =
+        messageIndex - 1;
+
+      index >= 0;
+
+      index -= 1
+    ) {
+      const previousMessage =
+        messages[
+          index
+        ];
+
+
+      if (
+        previousMessage?.role
+        === "user"
+      ) {
+        return (
+          previousMessage.content
+          || ""
+        );
+      }
+    }
+
+
+    return "";
+  };
+
+
+  /* =======================================================
      KEEP EXPANDED CASE REF CURRENT
      ======================================================= */
 
@@ -556,10 +595,6 @@ export default function ChatPage() {
             }
 
 
-            /* ---------------------------------------------
-               ADD TO NOTIFICATION DROPDOWN
-               --------------------------------------------- */
-
             setMessageNotifications(
               (current) => {
                 const alreadyExists =
@@ -585,10 +620,6 @@ export default function ChatPage() {
               }
             );
 
-
-            /* ---------------------------------------------
-               IF CASE IS ALREADY OPEN
-               --------------------------------------------- */
 
             if (
               expandedCaseIdRef.current
@@ -621,10 +652,6 @@ export default function ChatPage() {
             }
 
 
-            /* ---------------------------------------------
-               OTHERWISE ADD UNREAD COUNT
-               --------------------------------------------- */
-
             setUnreadByCase(
               (current) => ({
                 ...current,
@@ -641,10 +668,6 @@ export default function ChatPage() {
             );
 
 
-            /*
-             * Case information may have changed.
-             * Reload only when My Cases is next opened.
-             */
             setCasesLoaded(
               false
             );
@@ -1703,10 +1726,6 @@ export default function ChatPage() {
         );
 
 
-        /*
-         * Title generation may run asynchronously.
-         * Refresh once again shortly afterward.
-         */
         window.setTimeout(
           () => {
             loadConversationHistory(
@@ -1899,7 +1918,6 @@ export default function ChatPage() {
           <div className="customer-case-details">
 
             <div>
-
               <span>
                 Approval
               </span>
@@ -1909,12 +1927,10 @@ export default function ChatPage() {
                   ticket.approval_status
                 )}
               </strong>
-
             </div>
 
 
             <div>
-
               <span>
                 Status
               </span>
@@ -1924,12 +1940,10 @@ export default function ChatPage() {
                   ticket.status
                 )}
               </strong>
-
             </div>
 
 
             <div>
-
               <span>
                 Created
               </span>
@@ -1939,12 +1953,10 @@ export default function ChatPage() {
                   ticket.created_at
                 )}
               </strong>
-
             </div>
 
 
             <div>
-
               <span>
                 Last updated
               </span>
@@ -1954,7 +1966,6 @@ export default function ChatPage() {
                   ticket.updated_at
                 )}
               </strong>
-
             </div>
 
           </div>
@@ -2286,10 +2297,6 @@ export default function ChatPage() {
 
           <div className="topbar-actions">
 
-            {/* =============================================
-                NOTIFICATION BELL
-                ============================================= */}
-
             <div
               className="notification-menu-wrapper"
               ref={
@@ -2384,6 +2391,7 @@ export default function ChatPage() {
                           const ticketId =
                             notification.ticket_id;
 
+
                           const unread =
                             (
                               unreadByCase[
@@ -2471,10 +2479,6 @@ export default function ChatPage() {
             </div>
 
 
-            {/* =============================================
-                USER
-                ============================================= */}
-
             <div className="user-chip">
 
               <div className="avatar">
@@ -2522,10 +2526,6 @@ export default function ChatPage() {
           ================================================= */}
 
       <main className="chat-page">
-
-        {/* =================================================
-            HERO
-            ================================================= */}
 
         <section className="chat-hero">
 
@@ -2588,10 +2588,6 @@ export default function ChatPage() {
         </section>
 
 
-        {/* =================================================
-            CUSTOMER VIEW TABS
-            ================================================= */}
-
         <div className="customer-view-tabs">
 
           <button
@@ -2648,10 +2644,6 @@ export default function ChatPage() {
 
         {activeView === "chat" && (
           <section className="harbor-ai-layout glass-card">
-
-            {/* =============================================
-                CONVERSATION SIDEBAR
-                ============================================= */}
 
             <aside className="conversation-sidebar">
 
@@ -2870,10 +2862,6 @@ export default function ChatPage() {
             </aside>
 
 
-            {/* =============================================
-                CHAT AREA
-                ============================================= */}
-
             <div className="sidebar-chat-area">
 
               <div className="chat-workspace-header">
@@ -2925,11 +2913,9 @@ export default function ChatPage() {
 
                     <div className="loader-spinner" />
 
-
                     <strong>
                       Opening conversation
                     </strong>
-
 
                     <span>
                       Loading messages and sources...
@@ -2942,7 +2928,7 @@ export default function ChatPage() {
                   <>
 
                     {/* =====================================
-                        WELCOME DASHBOARD
+                        WELCOME
                         ===================================== */}
 
                     {messages.length === 0 && (
@@ -2973,10 +2959,6 @@ export default function ChatPage() {
 
                         </div>
 
-
-                        {/* =================================
-                            SUGGESTED PROMPTS
-                            ================================= */}
 
                         <div className="welcome-quick-grid">
 
@@ -3126,24 +3108,14 @@ export default function ChatPage() {
                         </div>
 
 
-                        {/* =================================
-                            LOWER DASHBOARD
-                            ================================= */}
-
                         <div className="welcome-lower-grid">
-
-                          {/* ===============================
-                              CAPABILITIES
-                              =============================== */}
 
                           <section className="welcome-capabilities">
 
                             <div className="welcome-section-heading">
-
                               <span>
                                 Harbor capabilities
                               </span>
-
                             </div>
 
 
@@ -3154,7 +3126,6 @@ export default function ChatPage() {
                                 <span className="capability-icon">
                                   ✓
                                 </span>
-
 
                                 <div>
 
@@ -3178,7 +3149,6 @@ export default function ChatPage() {
                                   ◫
                                 </span>
 
-
                                 <div>
 
                                   <strong>
@@ -3200,7 +3170,6 @@ export default function ChatPage() {
                                 <span className="capability-icon">
                                   ◷
                                 </span>
-
 
                                 <div>
 
@@ -3224,7 +3193,6 @@ export default function ChatPage() {
                                   ↗
                                 </span>
 
-
                                 <div>
 
                                   <strong>
@@ -3245,18 +3213,12 @@ export default function ChatPage() {
                           </section>
 
 
-                          {/* ===============================
-                              RECENT CONVERSATION
-                              =============================== */}
-
                           <section className="welcome-recent-panel">
 
                             <div className="welcome-section-heading">
-
                               <span>
                                 Continue where you left off
                               </span>
-
                             </div>
 
 
@@ -3280,18 +3242,14 @@ export default function ChatPage() {
                                   <div className="recent-conversation-copy">
 
                                     <strong>
-
                                       {recentConversation.title
                                         || "Recent conversation"}
-
                                     </strong>
 
 
                                     <span>
-
                                       {recentConversation.preview
                                         || "Continue this conversation"}
-
                                     </span>
 
                                   </div>
@@ -3300,14 +3258,11 @@ export default function ChatPage() {
                                   <div className="recent-conversation-meta">
 
                                     <span>
-
                                       {formatRelativeTime(
                                         recentConversation.updated_at
                                         || recentConversation.created_at
                                       )}
-
                                     </span>
-
 
                                     <strong>
                                       →
@@ -3325,11 +3280,9 @@ export default function ChatPage() {
                                     ✦
                                   </div>
 
-
                                   <strong>
                                     Your first conversation starts here
                                   </strong>
-
 
                                   <span>
                                     Choose a suggestion above
@@ -3356,7 +3309,8 @@ export default function ChatPage() {
 
                         {messages.map(
                           (
-                            message
+                            message,
+                            messageIndex
                           ) => (
                             <div
                               key={
@@ -3403,11 +3357,9 @@ export default function ChatPage() {
                                 <div className="message-meta">
 
                                   <strong>
-
                                     {message.role === "user"
                                       ? "You"
                                       : "Harbor"}
-
                                   </strong>
 
 
@@ -3415,11 +3367,9 @@ export default function ChatPage() {
                                     === "assistant"
                                     && (
                                       <span>
-
                                         {message.streaming
                                           ? "Responding..."
                                           : "AI Assistant"}
-
                                       </span>
                                     )}
 
@@ -3603,7 +3553,7 @@ export default function ChatPage() {
                                                   <div
                                                     className="citation-chip"
                                                     key={
-                                                      citationIndex
+                                                      `${citation.source || "source"}-${citation.chunk_index ?? citationIndex}`
                                                     }
                                                   >
 
@@ -3633,6 +3583,33 @@ export default function ChatPage() {
                                             </div>
 
                                           </div>
+                                        )}
+
+
+                                      {/* ===================
+                                          CUSTOMER FEEDBACK
+                                          =================== */}
+
+                                      {message.action === "answer"
+                                        && !message.escalationRequired
+                                        && (
+                                          <RagFeedback
+                                            messageId={
+                                              message.id
+                                            }
+                                            question={
+                                              getPreviousUserQuestion(
+                                                messageIndex
+                                              )
+                                            }
+                                            answer={
+                                              message.content
+                                            }
+                                            citations={
+                                              message.citations
+                                              || []
+                                            }
+                                          />
                                         )}
 
                                     </>
@@ -3669,10 +3646,6 @@ export default function ChatPage() {
                     )}
 
 
-                    {/* =====================================
-                        ERROR
-                        ===================================== */}
-
                     {error && (
                       <div className="alert alert-error chat-error">
 
@@ -3691,10 +3664,6 @@ export default function ChatPage() {
                       </div>
                     )}
 
-
-                    {/* =====================================
-                        COMPOSER
-                        ===================================== */}
 
                     <div className="chat-composer-shell">
 

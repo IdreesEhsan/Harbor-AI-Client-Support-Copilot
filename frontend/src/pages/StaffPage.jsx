@@ -7,6 +7,10 @@ import {
 } from "react";
 
 import {
+  Link,
+} from "react-router-dom";
+
+import {
   addInternalNote,
   executeTicket,
   getTicketUpdates,
@@ -32,6 +36,10 @@ export default function StaffPage() {
     logout,
   } = useAuth();
 
+
+  /* =======================================================
+     TICKET STATE
+     ======================================================= */
 
   const [
     tickets,
@@ -79,6 +87,10 @@ export default function StaffPage() {
   ] = useState(null);
 
 
+  /* =======================================================
+     CONVERSATION STATE
+     ======================================================= */
+
   const [
     expandedTicketId,
     setExpandedTicketId,
@@ -115,6 +127,10 @@ export default function StaffPage() {
   ] = useState("");
 
 
+  /* =======================================================
+     NOTIFICATION STATE
+     ======================================================= */
+
   const [
     messageNotifications,
     setMessageNotifications,
@@ -138,6 +154,10 @@ export default function StaffPage() {
     useRef(null);
 
 
+  /* =======================================================
+     KEEP REF CURRENT
+     ======================================================= */
+
   useEffect(() => {
     expandedTicketIdRef.current =
       expandedTicketId;
@@ -145,6 +165,10 @@ export default function StaffPage() {
     expandedTicketId,
   ]);
 
+
+  /* =======================================================
+     CLOSE NOTIFICATION DROPDOWN
+     ======================================================= */
 
   useEffect(() => {
     const handleOutsideClick =
@@ -181,6 +205,10 @@ export default function StaffPage() {
   }, []);
 
 
+  /* =======================================================
+     LOAD TICKETS
+     ======================================================= */
+
   const loadTickets =
     useCallback(
       async (
@@ -210,6 +238,12 @@ export default function StaffPage() {
           );
 
         } catch (err) {
+          console.error(
+            "Unable to load support tickets:",
+            err
+          );
+
+
           setError(
             err.response
               ?.data
@@ -238,12 +272,9 @@ export default function StaffPage() {
   ]);
 
 
-  /*
-   * REALTIME STAFF NOTIFICATIONS.
-   *
-   * No polling.
-   * No notification HTTP endpoint.
-   */
+  /* =======================================================
+     REALTIME NOTIFICATIONS
+     ======================================================= */
 
   useEffect(() => {
     if (
@@ -288,13 +319,17 @@ export default function StaffPage() {
 
             setMessageNotifications(
               (current) => {
-                if (
+                const exists =
                   current.some(
-                    (item) =>
+                    (
+                      item
+                    ) =>
                       item.id
                       === notification.id
-                  )
-                ) {
+                  );
+
+
+                if (exists) {
                   return current;
                 }
 
@@ -316,13 +351,17 @@ export default function StaffPage() {
             ) {
               setTicketUpdates(
                 (current) => {
-                  if (
+                  const exists =
                     current.some(
-                      (update) =>
+                      (
+                        update
+                      ) =>
                         update.id
                         === notification.id
-                    )
-                  ) {
+                    );
+
+
+                  if (exists) {
                     return current;
                   }
 
@@ -355,12 +394,14 @@ export default function StaffPage() {
             );
           },
 
+
         onReady:
           () => {
             console.log(
               "Harbor staff realtime ready."
             );
           },
+
 
         onError:
           (
@@ -380,6 +421,10 @@ export default function StaffPage() {
     user,
   ]);
 
+
+  /* =======================================================
+     APPROVE / REJECT
+     ======================================================= */
 
   const handleReview =
     async (
@@ -426,6 +471,12 @@ export default function StaffPage() {
         );
 
       } catch (err) {
+        console.error(
+          "Unable to review ticket:",
+          err
+        );
+
+
         setError(
           err.response
             ?.data
@@ -440,6 +491,10 @@ export default function StaffPage() {
       }
     };
 
+
+  /* =======================================================
+     EXECUTE
+     ======================================================= */
 
   const handleExecute =
     async (
@@ -461,7 +516,10 @@ export default function StaffPage() {
 
 
         setSuccessMessage(
-          "Ticket executed and synchronized successfully."
+          (
+            "Ticket executed and "
+            + "synchronized successfully."
+          )
         );
 
 
@@ -480,6 +538,12 @@ export default function StaffPage() {
         );
 
       } catch (err) {
+        console.error(
+          "Unable to execute ticket:",
+          err
+        );
+
+
         setError(
           err.response
             ?.data
@@ -494,6 +558,10 @@ export default function StaffPage() {
       }
     };
 
+
+  /* =======================================================
+     LOAD TICKET CONVERSATION
+     ======================================================= */
 
   const loadTicketUpdates =
     async (
@@ -522,6 +590,12 @@ export default function StaffPage() {
         );
 
       } catch (err) {
+        console.error(
+          "Unable to load ticket conversation:",
+          err
+        );
+
+
         setUpdateError(
           err.response
             ?.data
@@ -537,12 +611,18 @@ export default function StaffPage() {
     };
 
 
+  /* =======================================================
+     MARK TICKET READ
+     ======================================================= */
+
   const markTicketRead =
     (
       ticketId
     ) => {
       setUnreadByTicket(
-        (current) => ({
+        (
+          current
+        ) => ({
           ...current,
 
           [ticketId]:
@@ -551,6 +631,10 @@ export default function StaffPage() {
       );
     };
 
+
+  /* =======================================================
+     OPEN / CLOSE CONVERSATION
+     ======================================================= */
 
   const toggleConversation =
     async (
@@ -597,6 +681,10 @@ export default function StaffPage() {
       );
     };
 
+
+  /* =======================================================
+     SEND REPLY / NOTE
+     ======================================================= */
 
   const submitTicketUpdate =
     async (
@@ -661,7 +749,9 @@ export default function StaffPage() {
 
 
         setTicketUpdates(
-          (current) => [
+          (
+            current
+          ) => [
             ...current,
             newUpdate,
           ]
@@ -671,6 +761,12 @@ export default function StaffPage() {
         setUpdateContent("");
 
       } catch (err) {
+        console.error(
+          "Unable to add ticket update:",
+          err
+        );
+
+
         setUpdateError(
           err.response
             ?.data
@@ -686,259 +782,286 @@ export default function StaffPage() {
     };
 
 
-  const formatLabel = (
-    value
-  ) => {
-    if (!value) {
-      return "Unknown";
-    }
+  /* =======================================================
+     FORMAT HELPERS
+     ======================================================= */
 
-
-    return String(
+  const formatLabel =
+    (
       value
-    )
-      .replaceAll(
-        "_",
-        " "
-      )
-      .replace(
-        /\b\w/g,
-        (
-          character
-        ) =>
-          character.toUpperCase()
-      );
-  };
-
-
-  const formatDate = (
-    value
-  ) => {
-    if (!value) {
-      return "";
-    }
-
-
-    const date =
-      new Date(
-        value
-      );
-
-
-    if (
-      Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return "";
-    }
-
-
-    return date.toLocaleString(
-      undefined,
-      {
-        month:
-          "short",
-
-        day:
-          "numeric",
-
-        year:
-          "numeric",
-
-        hour:
-          "numeric",
-
-        minute:
-          "2-digit",
+    ) => {
+      if (!value) {
+        return "Unknown";
       }
-    );
-  };
 
 
-  const formatRelativeTime = (
-    value
-  ) => {
-    if (!value) {
-      return "";
-    }
-
-
-    const date =
-      new Date(
-        value
-      );
-
-
-    if (
-      Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return "";
-    }
-
-
-    const difference =
-      Date.now()
-      - date.getTime();
-
-
-    if (
-      difference
-      < 60000
-    ) {
-      return "Now";
-    }
-
-
-    if (
-      difference
-      < 3600000
-    ) {
       return (
-        `${Math.floor(
-          difference
-          / 60000
-        )}m`
+        String(
+          value
+        )
+          .replaceAll(
+            "_",
+            " "
+          )
+          .replace(
+            /\b\w/g,
+            (
+              character
+            ) =>
+              character
+                .toUpperCase()
+          )
       );
-    }
+    };
 
 
-    if (
-      difference
-      < 86400000
-    ) {
+  const formatDate =
+    (
+      value
+    ) => {
+      if (!value) {
+        return "";
+      }
+
+
+      const date =
+        new Date(
+          value
+        );
+
+
+      if (
+        Number.isNaN(
+          date.getTime()
+        )
+      ) {
+        return "";
+      }
+
+
       return (
-        `${Math.floor(
-          difference
-          / 3600000
-        )}h`
+        date.toLocaleString(
+          undefined,
+          {
+            month:
+              "short",
+
+            day:
+              "numeric",
+
+            year:
+              "numeric",
+
+            hour:
+              "numeric",
+
+            minute:
+              "2-digit",
+          }
+        )
       );
-    }
+    };
 
 
-    return (
-      `${Math.floor(
+  const formatRelativeTime =
+    (
+      value
+    ) => {
+      if (!value) {
+        return "";
+      }
+
+
+      const date =
+        new Date(
+          value
+        );
+
+
+      if (
+        Number.isNaN(
+          date.getTime()
+        )
+      ) {
+        return "";
+      }
+
+
+      const difference =
+        Date.now()
+        - date.getTime();
+
+
+      if (
         difference
-        / 86400000
-      )}d`
-    );
-  };
+        < 60000
+      ) {
+        return "Now";
+      }
 
 
-  const getSeverityClass = (
-    severity
-  ) => {
-    if (
+      if (
+        difference
+        < 3600000
+      ) {
+        return (
+          `${Math.floor(
+            difference
+            / 60000
+          )}m`
+        );
+      }
+
+
+      if (
+        difference
+        < 86400000
+      ) {
+        return (
+          `${Math.floor(
+            difference
+            / 3600000
+          )}h`
+        );
+      }
+
+
+      return (
+        `${Math.floor(
+          difference
+          / 86400000
+        )}d`
+      );
+    };
+
+
+  const getSeverityClass =
+    (
       severity
-      === "critical"
-    ) {
-      return (
-        "badge badge-danger"
-      );
-    }
+    ) => {
+      if (
+        severity
+        === "critical"
+      ) {
+        return (
+          "badge badge-danger"
+        );
+      }
 
 
-    if (
-      severity === "high"
-      || severity === "medium"
-    ) {
-      return (
-        "badge badge-warning"
-      );
-    }
+      if (
+        severity === "high"
+        || severity === "medium"
+      ) {
+        return (
+          "badge badge-warning"
+        );
+      }
 
 
-    return (
-      "badge badge-success"
-    );
-  };
-
-
-  const getStatusClass = (
-    status
-  ) => {
-    if (
-      [
-        "open",
-        "in_progress",
-        "resolved",
-        "closed",
-      ].includes(
-        status
-      )
-    ) {
       return (
         "badge badge-success"
       );
-    }
+    };
 
 
-    if (
-      [
-        "rejected",
-        "failed",
-      ].includes(
-        status
-      )
-    ) {
+  const getStatusClass =
+    (
+      status
+    ) => {
+      if (
+        [
+          "open",
+          "in_progress",
+          "resolved",
+          "closed",
+        ].includes(
+          status
+        )
+      ) {
+        return (
+          "badge badge-success"
+        );
+      }
+
+
+      if (
+        [
+          "rejected",
+          "failed",
+        ].includes(
+          status
+        )
+      ) {
+        return (
+          "badge badge-danger"
+        );
+      }
+
+
       return (
-        "badge badge-danger"
+        "badge badge-warning"
       );
-    }
+    };
 
 
-    return (
-      "badge badge-warning"
-    );
-  };
+  const getAuthorLabel =
+    (
+      update
+    ) => {
+      if (
+        update.update_type
+        === "internal_note"
+      ) {
+        return "Internal Note";
+      }
 
 
-  const getAuthorLabel = (
-    update
-  ) => {
-    if (
-      update.update_type
-      === "internal_note"
-    ) {
-      return "Internal Note";
-    }
+      if (
+        update.update_type
+        === "customer_reply"
+      ) {
+        return (
+          update.author
+            ?.full_name
+          || update.author
+            ?.email
+          || "Customer"
+        );
+      }
 
 
-    if (
-      update.update_type
-      === "customer_reply"
-    ) {
       return (
-        update.author?.full_name
-        || update.author?.email
-        || "Customer"
+        update.author
+          ?.full_name
+        || update.author
+          ?.email
+        || "Harbor Support"
       );
-    }
+    };
 
 
-    return (
-      update.author?.full_name
-      || update.author?.email
-      || "Harbor Support"
-    );
-  };
-
+  /* =======================================================
+     GROUP TICKETS
+     ======================================================= */
 
   const groups =
     useMemo(
       () => ({
         pending:
           tickets.filter(
-            (ticket) =>
+            (
+              ticket
+            ) =>
               ticket.status
               === "pending_approval"
           ),
 
         approved:
           tickets.filter(
-            (ticket) =>
+            (
+              ticket
+            ) =>
               [
                 "approved",
                 "executing",
@@ -949,7 +1072,9 @@ export default function StaffPage() {
 
         successful:
           tickets.filter(
-            (ticket) =>
+            (
+              ticket
+            ) =>
               [
                 "open",
                 "in_progress",
@@ -962,7 +1087,9 @@ export default function StaffPage() {
 
         rejected:
           tickets.filter(
-            (ticket) =>
+            (
+              ticket
+            ) =>
               [
                 "rejected",
                 "failed",
@@ -976,6 +1103,10 @@ export default function StaffPage() {
       ]
     );
 
+
+  /* =======================================================
+     FILTER ACTIVE GROUP
+     ======================================================= */
 
   const filteredActiveGroup =
     useMemo(
@@ -1041,6 +1172,10 @@ export default function StaffPage() {
     );
 
 
+  /* =======================================================
+     STATISTICS
+     ======================================================= */
+
   const statistics =
     useMemo(
       () => ({
@@ -1062,6 +1197,10 @@ export default function StaffPage() {
       ]
     );
 
+
+  /* =======================================================
+     UNREAD COUNT
+     ======================================================= */
 
   const totalUnreadNotifications =
     useMemo(
@@ -1086,13 +1225,20 @@ export default function StaffPage() {
     );
 
 
+  /* =======================================================
+     TAB CONFIG
+     ======================================================= */
+
   const tabConfig = {
     pending: {
       title:
         "Pending Review",
 
       description:
-        "New customer escalations waiting for a human decision.",
+        (
+          "New customer escalations waiting "
+          + "for a human decision."
+        ),
     },
 
     approved: {
@@ -1100,7 +1246,10 @@ export default function StaffPage() {
         "Approved / Ready to Execute",
 
       description:
-        "Approved tickets ready for controlled execution.",
+        (
+          "Approved tickets ready "
+          + "for controlled execution."
+        ),
     },
 
     successful: {
@@ -1108,7 +1257,10 @@ export default function StaffPage() {
         "Successful / Processed",
 
       description:
-        "Processed tickets progressing through support.",
+        (
+          "Processed tickets progressing "
+          + "through support."
+        ),
     },
 
     rejected: {
@@ -1116,7 +1268,10 @@ export default function StaffPage() {
         "Rejected / Failed",
 
       description:
-        "Rejected tickets or tickets that could not be completed.",
+        (
+          "Rejected tickets or tickets "
+          + "that could not be completed."
+        ),
     },
   };
 
@@ -1171,6 +1326,10 @@ export default function StaffPage() {
     };
 
 
+  /* =======================================================
+     OPEN NOTIFICATION
+     ======================================================= */
+
   const openTicketFromNotification =
     async (
       notification
@@ -1224,6 +1383,10 @@ export default function StaffPage() {
     };
 
 
+  /* =======================================================
+     TICKET CARD
+     ======================================================= */
+
   const renderTicketCard =
     (
       ticket
@@ -1232,9 +1395,11 @@ export default function StaffPage() {
         processingTicketId
         === ticket.id;
 
+
       const pendingApproval =
         ticket.approval_status
         === "pending";
+
 
       const canExecute =
         ticket.approval_status
@@ -1247,21 +1412,26 @@ export default function StaffPage() {
         )
         && !ticket.monday_item_id;
 
+
       const customer =
         ticket.customer;
+
 
       const customerName =
         customer?.full_name
         || "Unknown customer";
+
 
       const customerInitial =
         customerName
           .charAt(0)
           .toUpperCase();
 
+
       const conversationOpen =
         expandedTicketId
         === ticket.id;
+
 
       const unreadCount =
         unreadByTicket[
@@ -1277,6 +1447,10 @@ export default function StaffPage() {
           }
           className="ticket-card"
         >
+
+          {/* =============================================
+              HEADER
+              ============================================= */}
 
           <div className="ticket-card-top">
 
@@ -1306,13 +1480,16 @@ export default function StaffPage() {
 
 
               <span className="ticket-number">
+
                 Ticket{" "}
+
                 {String(
                   ticket.id
                 ).slice(
                   0,
                   8
                 )}
+
               </span>
 
             </div>
@@ -1333,6 +1510,10 @@ export default function StaffPage() {
           </div>
 
 
+          {/* =============================================
+              CUSTOMER
+              ============================================= */}
+
           <div className="ticket-customer-panel">
 
             <div className="ticket-customer-avatar">
@@ -1345,6 +1526,7 @@ export default function StaffPage() {
               <span className="ticket-customer-label">
                 Customer
               </span>
+
 
               <strong className="ticket-customer-name">
                 {customerName}
@@ -1368,6 +1550,7 @@ export default function StaffPage() {
                   Country
                 </span>
 
+
                 <strong>
                   {customer?.country
                     || "Not provided"}
@@ -1382,6 +1565,7 @@ export default function StaffPage() {
                   Age
                 </span>
 
+
                 <strong>
                   {customer?.age
                     ?? "Not provided"}
@@ -1394,12 +1578,17 @@ export default function StaffPage() {
           </div>
 
 
+          {/* =============================================
+              REQUEST
+              ============================================= */}
+
           {ticket.description && (
             <div className="ticket-request">
 
               <span className="ticket-request-label">
                 Customer request
               </span>
+
 
               <p className="ticket-description">
                 {ticket.description}
@@ -1409,9 +1598,14 @@ export default function StaffPage() {
           )}
 
 
+          {/* =============================================
+              METADATA
+              ============================================= */}
+
           <div className="ticket-metadata-grid">
 
             <div>
+
               <span>
                 Approval
               </span>
@@ -1421,10 +1615,12 @@ export default function StaffPage() {
                   ticket.approval_status
                 )}
               </strong>
+
             </div>
 
 
             <div>
+
               <span>
                 Severity
               </span>
@@ -1434,10 +1630,12 @@ export default function StaffPage() {
                   ticket.severity
                 )}
               </strong>
+
             </div>
 
 
             <div>
+
               <span>
                 Workflow
               </span>
@@ -1447,10 +1645,12 @@ export default function StaffPage() {
                   ticket.status
                 )}
               </strong>
+
             </div>
 
 
             <div>
+
               <span>
                 Monday
               </span>
@@ -1460,10 +1660,15 @@ export default function StaffPage() {
                   ? "Synchronized"
                   : "Not synchronized"}
               </strong>
+
             </div>
 
           </div>
 
+
+          {/* =============================================
+              MONDAY
+              ============================================= */}
 
           {ticket.monday_item_id && (
             <div className="integration-status">
@@ -1472,15 +1677,20 @@ export default function StaffPage() {
                 M
               </div>
 
+
               <div>
 
                 <strong>
                   Monday.com synchronized
                 </strong>
 
+
                 <span>
+
                   Item ID:{" "}
+
                   {ticket.monday_item_id}
+
                 </span>
 
               </div>
@@ -1488,6 +1698,10 @@ export default function StaffPage() {
             </div>
           )}
 
+
+          {/* =============================================
+              FAILURE
+              ============================================= */}
 
           {ticket.failure_reason && (
             <div className="alert alert-error ticket-alert">
@@ -1498,6 +1712,7 @@ export default function StaffPage() {
                   Execution failure
                 </strong>
 
+
                 <span>
                   {ticket.failure_reason}
                 </span>
@@ -1507,6 +1722,10 @@ export default function StaffPage() {
             </div>
           )}
 
+
+          {/* =============================================
+              FOOTER
+              ============================================= */}
 
           <div className="ticket-card-footer">
 
@@ -1523,9 +1742,11 @@ export default function StaffPage() {
               >
 
                 <span>
+
                   {conversationOpen
                     ? "Hide conversation"
                     : "💬 Conversation"}
+
                 </span>
 
 
@@ -1616,11 +1837,16 @@ export default function StaffPage() {
           </div>
 
 
+          {/* =============================================
+              FULL ID
+              ============================================= */}
+
           <div className="ticket-id-full">
 
             <span>
               Ticket ID
             </span>
+
 
             <code>
               {ticket.id}
@@ -1628,6 +1854,10 @@ export default function StaffPage() {
 
           </div>
 
+
+          {/* =============================================
+              CONVERSATION
+              ============================================= */}
 
           {conversationOpen && (
             <div className="ticket-conversation-panel">
@@ -1639,6 +1869,7 @@ export default function StaffPage() {
                   <h4>
                     Case Conversation
                   </h4>
+
 
                   <p>
                     Customer messages, staff replies,
@@ -1688,6 +1919,7 @@ export default function StaffPage() {
                             update.update_type
                             === "internal_note";
 
+
                           const customerReply =
                             update.update_type
                             === "customer_reply";
@@ -1724,6 +1956,7 @@ export default function StaffPage() {
                                   )}
                                 </strong>
 
+
                                 <span>
                                   {formatDate(
                                     update.created_at
@@ -1759,6 +1992,10 @@ export default function StaffPage() {
                 </div>
               )}
 
+
+              {/* =========================================
+                  MODE SWITCH
+                  ========================================= */}
 
               <div className="ticket-update-mode-tabs">
 
@@ -1806,6 +2043,10 @@ export default function StaffPage() {
               </div>
 
 
+              {/* =========================================
+                  COMPOSER
+                  ========================================= */}
+
               <form
                 className="ticket-update-composer"
                 onSubmit={(event) =>
@@ -1829,8 +2070,14 @@ export default function StaffPage() {
                   placeholder={
                     updateMode
                     === "internal_note"
-                      ? "Add a private note for support staff..."
-                      : "Write a reply to the customer..."
+                      ? (
+                        "Add a private note "
+                        + "for support staff..."
+                      )
+                      : (
+                        "Write a reply "
+                        + "to the customer..."
+                      )
                   }
                   disabled={
                     updateSubmitting
@@ -1841,6 +2088,7 @@ export default function StaffPage() {
                 <div className="ticket-update-composer-footer">
 
                   <span>
+
                     {updateMode
                     === "internal_note"
                       ? (
@@ -1851,6 +2099,7 @@ export default function StaffPage() {
                         "The customer will "
                         + "see this reply."
                       )}
+
                   </span>
 
 
@@ -1867,12 +2116,14 @@ export default function StaffPage() {
                       || !updateContent.trim()
                     }
                   >
+
                     {updateSubmitting
                       ? "Saving..."
                       : updateMode
                         === "internal_note"
                           ? "Add note"
                           : "Send reply"}
+
                   </button>
 
                 </div>
@@ -1887,6 +2138,10 @@ export default function StaffPage() {
     };
 
 
+  /* =======================================================
+     LOADER
+     ======================================================= */
+
   if (loading) {
     return (
       <div className="fullscreen-loader">
@@ -1895,7 +2150,9 @@ export default function StaffPage() {
           H
         </div>
 
+
         <div className="loader-spinner" />
+
 
         <p>
           Loading Harbor operations...
@@ -1906,16 +2163,29 @@ export default function StaffPage() {
   }
 
 
+  /* =======================================================
+     PAGE
+     ======================================================= */
+
   return (
     <div className="app-page staff-app-page">
 
       <div className="background-orb app-orb-one" />
+
       <div className="background-orb app-orb-two" />
 
+
+      {/* =================================================
+          TOPBAR
+          ================================================= */}
 
       <nav className="topbar">
 
         <div className="topbar-inner">
+
+          {/* =============================================
+              BRAND
+              ============================================= */}
 
           <div className="brand-mark">
 
@@ -1923,11 +2193,13 @@ export default function StaffPage() {
               H
             </div>
 
+
             <div>
 
               <span className="brand-name">
                 Harbor
               </span>
+
 
               <span className="brand-caption">
                 Operations
@@ -1937,6 +2209,10 @@ export default function StaffPage() {
 
           </div>
 
+
+          {/* =============================================
+              STATUS
+              ============================================= */}
 
           <div className="topbar-center">
 
@@ -1951,7 +2227,85 @@ export default function StaffPage() {
           </div>
 
 
+          {/* =============================================
+              RIGHT SIDE
+              ============================================= */}
+
           <div className="topbar-actions">
+
+            {/* ===========================================
+                KNOWLEDGE
+                =========================================== */}
+
+            <Link
+              to="/staff/knowledge"
+              className="staff-knowledge-button"
+            >
+
+              <span className="staff-knowledge-icon">
+                ◫
+              </span>
+
+
+              <span className="staff-knowledge-copy">
+
+                <strong>
+                  Knowledge
+                </strong>
+
+
+                <small>
+                  Manage policies
+                </small>
+
+              </span>
+
+
+              <span className="staff-knowledge-arrow">
+                →
+              </span>
+
+            </Link>
+
+
+            {/* ===========================================
+                RAG QUALITY
+                =========================================== */}
+
+            <Link
+              to="/staff/rag-quality"
+              className="staff-quality-button"
+            >
+
+              <span className="staff-quality-icon">
+                ✦
+              </span>
+
+
+              <span className="staff-quality-copy">
+
+                <strong>
+                  RAG Quality
+                </strong>
+
+
+                <small>
+                  AI performance
+                </small>
+
+              </span>
+
+
+              <span className="staff-quality-arrow">
+                →
+              </span>
+
+            </Link>
+
+
+            {/* ===========================================
+                NOTIFICATIONS
+                =========================================== */}
 
             <div
               className="notification-menu-wrapper"
@@ -1973,7 +2327,9 @@ export default function StaffPage() {
                 }
                 aria-label="Notifications"
               >
-                🔔
+                <span className="notification-bell-icon">
+                  🔔
+                </span>
 
 
                 {totalUnreadNotifications > 0 && (
@@ -1999,6 +2355,7 @@ export default function StaffPage() {
                       <strong>
                         Notifications
                       </strong>
+
 
                       <span>
                         Customer messages
@@ -2026,12 +2383,15 @@ export default function StaffPage() {
                             ✓
                           </div>
 
+
                           <strong>
                             You're all caught up
                           </strong>
 
+
                           <span>
-                            New customer replies will appear here.
+                            New customer replies
+                            will appear here.
                           </span>
 
                         </div>
@@ -2044,6 +2404,7 @@ export default function StaffPage() {
                           const ticketId =
                             notification.ticket_id;
 
+
                           const unread =
                             (
                               unreadByTicket[
@@ -2051,6 +2412,7 @@ export default function StaffPage() {
                               ]
                               || 0
                             ) > 0;
+
 
                           const customerName =
                             notification
@@ -2118,14 +2480,20 @@ export default function StaffPage() {
                                 <div className="notification-dropdown-footer">
 
                                   <span>
-                                    {notification.ticket?.title
-                                      || "Support Ticket"}
+
+                                    {notification.ticket
+                                      ?.title
+                                    || "Support Ticket"}
+
                                   </span>
 
+
                                   <span>
+
                                     {formatRelativeTime(
                                       notification.created_at
                                     )}
+
                                   </span>
 
                                 </div>
@@ -2145,13 +2513,19 @@ export default function StaffPage() {
             </div>
 
 
+            {/* ===========================================
+                USER
+                =========================================== */}
+
             <div className="user-chip">
 
               <div className="avatar">
+
                 {user?.email
                   ?.charAt(0)
                   ?.toUpperCase()
                   || "S"}
+
               </div>
 
 
@@ -2161,14 +2535,24 @@ export default function StaffPage() {
                   {user?.email}
                 </strong>
 
+
                 <span>
-                  Support Agent
+
+                  {user?.role
+                  === "admin"
+                    ? "Administrator"
+                    : "Support Agent"}
+
                 </span>
 
               </div>
 
             </div>
 
+
+            {/* ===========================================
+                LOGOUT
+                =========================================== */}
 
             <button
               type="button"
@@ -2187,7 +2571,15 @@ export default function StaffPage() {
       </nav>
 
 
+      {/* =================================================
+          MAIN
+          ================================================= */}
+
       <main className="staff-page">
+
+        {/* =================================================
+            HERO
+            ================================================= */}
 
         <section className="staff-hero">
 
@@ -2197,9 +2589,11 @@ export default function StaffPage() {
               OPERATIONS CONSOLE
             </span>
 
+
             <h1>
               Support Operations
             </h1>
+
 
             <p>
               Review escalations, communicate with customers,
@@ -2222,18 +2616,26 @@ export default function StaffPage() {
             }
           >
             ↻{" "}
+
             {refreshing
               ? "Refreshing..."
               : "Refresh queue"}
+
           </button>
 
         </section>
 
 
+        {/* =================================================
+            STATISTICS
+            ================================================= */}
+
         <section className="stats-grid">
 
           <div className="stat-card glass-card">
+
             <div>
+
               <span>
                 Total tickets
               </span>
@@ -2241,12 +2643,16 @@ export default function StaffPage() {
               <strong>
                 {statistics.total}
               </strong>
+
             </div>
+
           </div>
 
 
           <div className="stat-card glass-card">
+
             <div>
+
               <span>
                 Pending review
               </span>
@@ -2254,12 +2660,16 @@ export default function StaffPage() {
               <strong>
                 {statistics.pending}
               </strong>
+
             </div>
+
           </div>
 
 
           <div className="stat-card glass-card">
+
             <div>
+
               <span>
                 Approved
               </span>
@@ -2267,12 +2677,16 @@ export default function StaffPage() {
               <strong>
                 {statistics.approved}
               </strong>
+
             </div>
+
           </div>
 
 
           <div className="stat-card glass-card">
+
             <div>
+
               <span>
                 Successful
               </span>
@@ -2280,25 +2694,61 @@ export default function StaffPage() {
               <strong>
                 {statistics.successful}
               </strong>
+
             </div>
+
           </div>
 
         </section>
 
 
+        {/* =================================================
+            ALERTS
+            ================================================= */}
+
         {error && (
           <div className="alert alert-error">
-            {error}
+
+            <div>
+
+              <strong>
+                Something went wrong
+              </strong>
+
+
+              <span>
+                {error}
+              </span>
+
+            </div>
+
           </div>
         )}
 
 
         {successMessage && (
           <div className="alert alert-success">
-            {successMessage}
+
+            <div>
+
+              <strong>
+                Success
+              </strong>
+
+
+              <span>
+                {successMessage}
+              </span>
+
+            </div>
+
           </div>
         )}
 
+
+        {/* =================================================
+            FILTERS
+            ================================================= */}
 
         <section className="staff-filter-bar glass-card">
 
@@ -2307,6 +2757,7 @@ export default function StaffPage() {
             <span className="staff-search-icon">
               ⌕
             </span>
+
 
             <input
               type="text"
@@ -2332,6 +2783,7 @@ export default function StaffPage() {
                 Severity
               </span>
 
+
               <select
                 value={
                   severityFilter
@@ -2342,6 +2794,7 @@ export default function StaffPage() {
                   )
                 }
               >
+
                 <option value="all">
                   All severities
                 </option>
@@ -2361,6 +2814,7 @@ export default function StaffPage() {
                 <option value="critical">
                   Critical
                 </option>
+
               </select>
 
             </label>
@@ -2385,6 +2839,10 @@ export default function StaffPage() {
         </section>
 
 
+        {/* =================================================
+            TABS
+            ================================================= */}
+
         <div className="staff-view-tabs">
 
           {[
@@ -2392,14 +2850,17 @@ export default function StaffPage() {
               "pending",
               "Pending Review",
             ],
+
             [
               "approved",
               "Approved",
             ],
+
             [
               "successful",
               "Successful",
             ],
+
             [
               "rejected",
               "Rejected / Failed",
@@ -2438,6 +2899,7 @@ export default function StaffPage() {
 
                 {label}
 
+
                 <span className="staff-tab-count">
                   {
                     groups[
@@ -2453,6 +2915,10 @@ export default function StaffPage() {
         </div>
 
 
+        {/* =================================================
+            TICKET PANEL
+            ================================================= */}
+
         <section className="staff-tab-panel glass-card">
 
           <div className="staff-tab-panel-header">
@@ -2467,6 +2933,7 @@ export default function StaffPage() {
                 }
               </h2>
 
+
               <p>
                 {
                   tabConfig[
@@ -2479,20 +2946,40 @@ export default function StaffPage() {
 
 
             <span className="staff-panel-count">
+
               {filteredActiveGroup.length}
               {" "}
-              {filteredActiveGroup.length === 1
+
+              {filteredActiveGroup.length
+              === 1
                 ? "ticket"
                 : "tickets"}
+
             </span>
 
           </div>
 
 
-          {filteredActiveGroup.length === 0
+          {filteredActiveGroup.length
+          === 0
             ? (
               <div className="staff-tab-empty">
-                Nothing here.
+
+                <div className="staff-tab-empty-icon">
+                  ✓
+                </div>
+
+
+                <h3>
+                  Nothing here
+                </h3>
+
+
+                <p>
+                  No support tickets match
+                  this queue and filter.
+                </p>
+
               </div>
             )
 
