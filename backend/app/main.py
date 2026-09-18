@@ -6,11 +6,9 @@ from fastapi import (
     FastAPI,
     Request,
 )
-
 from fastapi.middleware.cors import (
     CORSMiddleware,
 )
-
 from fastapi.responses import (
     JSONResponse,
 )
@@ -18,7 +16,6 @@ from fastapi.responses import (
 from slowapi import (
     _rate_limit_exceeded_handler,
 )
-
 from slowapi.errors import (
     RateLimitExceeded,
 )
@@ -26,35 +23,31 @@ from slowapi.errors import (
 from app.api.agent import (
     router as agent_router,
 )
-
 from app.api.auth import (
     router as auth_router,
 )
-
 from app.api.conversations import (
     router as conversations_router,
 )
-
 from app.api.health import (
     router as health_router,
 )
-
 from app.api.rag import (
     router as rag_router,
 )
-
 from app.api.realtime import (
     router as realtime_router,
 )
-
 from app.api.tickets import (
     router as tickets_router,
+)
+from app.api.voice import (
+    router as voice_router,
 )
 
 from app.core.config import (
     get_settings,
 )
-
 from app.core.rate_limit import (
     limiter,
 )
@@ -63,13 +56,16 @@ from app.core.rate_limit import (
 settings = get_settings()
 
 
+# ============================================================
+# Logging
+# ============================================================
+
 logging.basicConfig(
     level=getattr(
         logging,
         settings.log_level.upper(),
         logging.INFO,
     ),
-
     format=(
         "%(asctime)s | "
         "%(levelname)s | "
@@ -84,12 +80,20 @@ logger = logging.getLogger(
 )
 
 
+# ============================================================
+# Application
+# ============================================================
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     debug=settings.debug,
 )
 
+
+# ============================================================
+# Rate limiter
+# ============================================================
 
 app.state.limiter = (
     limiter
@@ -101,6 +105,10 @@ app.add_exception_handler(
     _rate_limit_exceeded_handler,
 )
 
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -133,11 +141,28 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# Request logging
+# ============================================================
+
 @app.middleware("http")
 async def request_logging_middleware(
     request: Request,
     call_next,
 ):
+    """
+    Attach a request ID and record safe request metrics.
+
+    Harbor deliberately does not log:
+
+    - JWTs
+    - authorization headers
+    - API keys
+    - request bodies
+    - passwords
+    - raw customer PII
+    """
+
     request_id = (
         request.headers.get(
             "X-Request-ID"
@@ -161,7 +186,6 @@ async def request_logging_middleware(
         )
 
     except Exception:
-
         duration_ms = (
             (
                 time.perf_counter()
@@ -223,6 +247,10 @@ async def request_logging_middleware(
     return response
 
 
+# ============================================================
+# Global exception handler
+# ============================================================
+
 @app.exception_handler(
     Exception
 )
@@ -230,6 +258,12 @@ async def global_exception_handler(
     request: Request,
     exc: Exception,
 ):
+    """
+    Return a safe error message for unexpected failures.
+
+    Full stack traces remain available only in backend logs.
+    """
+
     request_id = (
         request.headers.get(
             "X-Request-ID"
@@ -258,7 +292,10 @@ async def global_exception_handler(
 
         content={
             "detail":
-                "An unexpected server error occurred.",
+                (
+                    "An unexpected server error "
+                    "occurred."
+                ),
 
             "request_id":
                 request_id,
@@ -270,6 +307,10 @@ async def global_exception_handler(
         },
     )
 
+
+# ============================================================
+# Root endpoint
+# ============================================================
 
 @app.get("/")
 def root():
@@ -285,8 +326,15 @@ def root():
 
         "version":
             "1.0.0",
+
+        "voice":
+            "enabled",
     }
 
+
+# ============================================================
+# Routers
+# ============================================================
 
 app.include_router(
     health_router,
@@ -334,6 +382,15 @@ app.include_router(
 
 
 app.include_router(
+    tickets_router,
+    prefix=settings.api_prefix,
+    tags=[
+        "Tickets",
+    ],
+)
+
+
+app.include_router(
     realtime_router,
     prefix=settings.api_prefix,
     tags=[
@@ -343,9 +400,9 @@ app.include_router(
 
 
 app.include_router(
-    tickets_router,
+    voice_router,
     prefix=settings.api_prefix,
     tags=[
-        "Tickets",
+        "Voice",
     ],
 )

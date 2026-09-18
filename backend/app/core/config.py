@@ -103,7 +103,7 @@ class Settings(
 
 
     # ========================================================
-    # Harbor staff
+    # Harbor Staff
     # ========================================================
 
     staff_email: str
@@ -212,12 +212,25 @@ class Settings(
     ) = None
 
     n8n_webhook_timeout_seconds: float = (
-        8.0
+        10.0
     )
 
 
     # ========================================================
-    # Configuration
+    # Retell AI
+    # ========================================================
+
+    retell_api_key: (
+        str | None
+    ) = None
+
+    retell_agent_id: (
+        str | None
+    ) = None
+
+
+    # ========================================================
+    # Configuration helpers
     # ========================================================
 
     model_config = (
@@ -237,10 +250,6 @@ class Settings(
     )
 
 
-    # ========================================================
-    # HELPERS
-    # ========================================================
-
     def get_cors_origins(
         self,
     ) -> list[str]:
@@ -259,8 +268,8 @@ class Settings(
         if not origins:
             raise ValueError(
                 (
-                    "At least one CORS "
-                    "origin must be configured."
+                    "At least one CORS origin "
+                    "must be configured."
                 )
             )
 

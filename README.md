@@ -1,160 +1,479 @@
 # Harbor — AI Client Support Copilot
 
-Harbor is an end-to-end AI client support system built as a DevOrbis capstone project. It combines a React customer/staff interface, FastAPI backend, JWT authentication, Supabase PostgreSQL + pgvector, MiniLM embeddings, Groq-powered RAG, LangGraph orchestration, persistent conversation memory, security guardrails, human-in-the-loop ticket approval, Monday.com integration, n8n Cloud automation, Gmail notifications, Supabase audit logging, and Snowflake reporting.
+Harbor is an end-to-end AI-powered customer support system built as the DevOrbis Capstone Project.
 
-> **Project goal:** give customers grounded support answers with citations, preserve conversational context, escalate safely to humans when needed, and connect approved support tickets to real business systems without manual Postman steps.
+It combines:
 
----
+- Retrieval-Augmented Generation (RAG)
+- AI agents
+- Conversation memory
+- Human-in-the-loop approval
+- Real-time customer/staff communication
+- Monday.com integration
+- n8n workflow automation
+- Supabase authentication and database storage
+- A React frontend
+- A FastAPI backend
 
-## 1. Problem Statement
-
-Traditional support workflows often split customer conversations, internal approvals, ticket systems, notifications, and analytics across disconnected tools.
-
-Harbor connects the complete support workflow:
-
-1. A customer authenticates and asks a support question.
-2. Harbor retrieves relevant support knowledge using RAG.
-3. The agent answers only when there is enough grounded evidence.
-4. Conversation memory preserves useful context across turns.
-5. Guardrails handle unsafe, sensitive, or escalation-worthy inputs.
-6. When human help is required, Harbor creates an internal support ticket.
-7. Authorized staff review the ticket and approve or reject it.
-8. Approved tickets are executed safely and idempotently into Monday.com.
-9. Harbor sends the completed event to n8n Cloud.
-10. n8n handles notification, audit, and analytics through Gmail, Supabase, and Snowflake.
+Harbor is designed so that AI can answer normal support questions automatically while sensitive or action-based requests are escalated to a human support agent before external actions are executed.
 
 ---
 
-## 2. Core Features
+# 1. Project Objective
 
-### Customer Support
-- React customer chat interface
-- JWT authentication
-- Grounded knowledge-base answers
+The goal of Harbor is to demonstrate a realistic AI-powered customer support workflow.
+
+The system supports two major types of requests:
+
+### Informational Requests
+
+Examples:
+
+- What is the refund policy?
+- How do I change my password?
+- What payment methods are supported?
+
+Harbor answers these requests using the RAG knowledge base and provides citations to the retrieved sources.
+
+### Action Requests
+
+Examples:
+
+- Refund my payment.
+- Cancel my subscription.
+- I was charged twice.
+- Please change something on my account.
+
+These requests are not executed directly by AI.
+
+Instead:
+
+1. Harbor detects that human intervention is required.
+2. Harbor asks the customer for confirmation.
+3. A support ticket is created.
+4. A human support agent reviews the ticket.
+5. The support agent approves or rejects the request.
+6. Only an approved ticket can be executed.
+7. Harbor creates the corresponding item in Monday.com.
+8. Harbor sends a downstream event to n8n.
+9. n8n handles additional business automation.
+
+This architecture keeps AI assistance useful while maintaining human control over sensitive operations.
+
+---
+
+# 2. Main Features
+
+## AI Support Assistant
+
+Customers can interact with Harbor through a conversational support interface.
+
+The assistant supports:
+
+- Streaming AI responses
+- Multi-turn conversations
+- Persistent conversation history
+- Conversation titles
+- Conversation memory
+- RAG-based answers
 - Source citations
-- Contextual follow-up questions
-- Persistent conversation memory
-- Human escalation
-- Customer-visible support ticket state
-
-### AI / RAG
-- Groq LLM integration
-- `sentence-transformers/all-MiniLM-L6-v2`
-- 384-dimensional embeddings
-- Supabase PostgreSQL + pgvector
-- Similarity retrieval
-- Source/chunk metadata
-- Grounded no-answer behavior
-
-### LangGraph Agent
-- Structured routing
-- Knowledge-base answer path
-- Conversation-memory answer path
-- Clarification path
-- Escalation path
-- Blocked-input path
-- Step/tool execution limits
-
-### Guardrails & Security
-- Prompt-injection detection
-- PII/credential redaction
-- Output guardrails
-- Safe persistence
-- Tool authorization
-- Human approval before external writes
-- JWT authentication
-- RBAC
-- API rate limiting
-- LLM input limits
-- Environment-based secrets
-
-### Ticket Workflow
-- Internal support tickets
-- Severity classification
-- `pending_approval` workflow
-- Staff approval/rejection
-- Staff-only execution
-- Atomic execution claims
-- Stale execution-lease recovery
-- Deterministic idempotency
-
-### Integrations
-- Monday.com
-- n8n Cloud
-- Gmail
-- Supabase audit logging
-- Snowflake reporting
+- Escalation detection
+- Ticket confirmation
 
 ---
 
-## 3. System Architecture
+## Retrieval-Augmented Generation
+
+Harbor uses a knowledge base to answer support questions.
+
+The RAG pipeline includes:
+
+1. Customer query
+2. Input guardrails
+3. Query embedding
+4. Vector similarity search
+5. Relevant knowledge retrieval
+6. Context injection
+7. LLM answer generation
+8. Citation generation
+9. Output validation
+
+The embedding model used is:
 
 ```text
-Customer / Staff
-      |
-      v
-React Frontend
-      |
-      v
-FastAPI REST API
-JWT Authentication + RBAC
-      |
-      v
-LangGraph Support Agent
-  |          |          |
-  v          v          v
- RAG       Memory    Guardrails
-  |          |          |
-  v          v          v
-Groq     Supabase      Tools
-  |
-  v
-MiniLM Embeddings
-      |
-      v
-Supabase pgvector
-Knowledge Base
-      |
-      v
-Escalation Decision
-      |
-      v
-Internal Support Ticket
-      |
-      v
-Human Approval / Rejection
-      |
-      v
-Safe + Idempotent Execution
-      |
-      v
+sentence-transformers/all-MiniLM-L6-v2
+
+The vector database is implemented using Supabase PostgreSQL with pgvector.
+
+3. Conversation Memory
+
+Harbor supports persistent conversation memory.
+
+Two memory strategies are used:
+
+Recent Message Buffer
+
+Recent conversation messages are loaded for short-term context.
+
+Conversation Summary
+
+Long conversations can be compressed into summaries for longer-term context.
+
+Conversation messages are stored permanently in Supabase.
+
+Assistant message metadata also stores information such as:
+
+Citations
+Action type
+Severity
+Escalation status
+Ticket ID
+Ticket status
+Approval status
+
+This allows old conversations to be reopened without losing their AI response metadata or sources.
+
+4. Conversation History
+
+The customer interface includes a ChatGPT-style conversation sidebar.
+
+Features include:
+
+New conversation
+Previous conversation history
+AI-generated conversation titles
+Latest-message previews
+Persistent messages
+Source citation restoration
+Continue previous conversations
+
+Conversation titles are generated automatically from the customer's first message.
+
+Example:
+
+Customer:
+I was charged twice and need one payment refunded.
+
+Generated title:
+Duplicate Charge Refund
+5. Guardrails
+
+Harbor contains input and output guardrails.
+
+Input guardrails determine whether customer content should be:
+
+allow
+redact
+block
+escalate
+
+Sensitive action requests are escalated instead of directly executed.
+
+Harbor separates:
+
+AI reasoning
+        ↓
+Human approval
+        ↓
+External execution
+
+This prevents the AI agent from independently performing sensitive actions.
+
+6. Human-in-the-Loop Workflow
+
+Sensitive requests follow this workflow:
+
+Customer request
+        ↓
+AI identifies action request
+        ↓
+Customer confirmation
+        ↓
+Support ticket created
+        ↓
+Human support agent review
+        ↓
+Approve / Reject
+        ↓
+Approved ticket
+        ↓
+Execute
+
+The external tool cannot be executed unless Harbor has a persisted:
+
+approval_status = approved
+7. Ticket Management
+
+Customers can:
+
+View their cases
+Open case details
+Read staff replies
+Reply to support agents
+
+Support agents can:
+
+View all tickets
+Filter tickets
+Search tickets
+View customer information
+Approve tickets
+Reject tickets
+Reply to customers
+Add internal notes
+Execute approved tickets
+
+Internal staff notes are never shown to customers.
+
+8. Ticket Status Flow
+
+A typical successful ticket moves through:
+
+pending_approval
+        ↓
+approved
+        ↓
+executing
+        ↓
+open
+
+Rejected tickets use:
+
+rejected
+
+Failed execution states can also be tracked.
+
+9. Real-Time Notifications
+
+Harbor uses WebSockets for real-time ticket message notifications.
+
+A WebSocket connection is established after authentication:
+
+/api/v1/ws/notifications
+Customer notification
+
+When a support agent sends:
+
+staff_reply
+
+the customer receives the event immediately.
+
+Staff notification
+
+When a customer sends:
+
+customer_reply
+
+support agents receive the event immediately.
+
+Internal notes
+internal_note
+
+never generate customer notifications.
+
+The UI includes:
+
+Notification bell
+Unread badge
+Notification dropdown
+Per-ticket unread counts
+10. Monday.com Integration
+
+Once a ticket receives human approval, a support agent can execute it.
+
+Harbor performs:
+
+Approved Ticket
+      ↓
+Atomic Execution Claim
+      ↓
+Idempotency Lookup
+      ↓
 Monday.com
-      |
-      v
-n8n Cloud
-   |          |           |
-   v          v           v
- Gmail   Supabase Audit  Snowflake
-4. Technology Stack
-Layer	Technology
-Frontend	React, Vite, React Router, Axios
-Backend	FastAPI, Python, Pydantic
-Authentication	JWT, bcrypt
-Database	Supabase PostgreSQL
-Vector Search	pgvector
-Embeddings	Sentence Transformers / MiniLM
-LLM	Groq
-Agent	LangGraph
-Ticketing	Monday.com
-Automation	n8n Cloud
-Notification	Gmail
-Audit	Supabase
-Analytics	Snowflake
-Containerization	Docker
-Deployment	Railway
-Testing	pytest + E2E testing
-5. Repository Structure
+
+Before creating an item, Harbor searches Monday.com using a deterministic idempotency key.
+
+This prevents duplicate external tickets.
+
+Monday.com stores:
+
+Ticket title
+Harbor ticket ID
+Status
+Idempotency key
+Description
+Severity
+
+After successful execution, Harbor stores:
+
+monday_item_id
+
+in Supabase.
+
+11. Safe Execution / Idempotency
+
+Harbor contains execution protection to prevent duplicate external actions.
+
+The process is:
+
+approved
+   ↓
+atomic claim
+   ↓
+executing
+   ↓
+Monday lookup
+   ↓
+reuse existing item OR create new item
+   ↓
+persist monday_item_id
+
+Harbor also supports stale execution-claim recovery.
+
+This is important if the server stops during an external execution.
+
+12. n8n Automation
+
+After Monday.com execution succeeds and Harbor stores the external result, Harbor sends an event to an n8n production webhook.
+
+Example event:
+
+{
+  "event_type": "ticket.executed",
+  "event_version": "1.0",
+  "source": "harbor",
+  "ticket_id": "ticket-uuid",
+  "monday_item_id": "2861941922",
+  "title": "Duplicate charge refund",
+  "description": "Customer requested a refund.",
+  "severity": "high",
+  "status": "open",
+  "approval_status": "approved",
+  "idempotency_key": "harbor-ticket-..."
+}
+
+The n8n workflow performs:
+
+Webhook
+   ↓
+Validate & Normalize
+   ↓
+Duplicate Check
+   ↓
+Priority Routing
+   ↓
+Email / Notification
+   ↓
+Audit Logging
+   ↓
+Snowflake Reporting
+
+n8n is executed after Harbor has safely completed the Monday.com synchronization.
+
+Therefore, an n8n failure does not recreate the Monday.com item.
+
+13. Authentication and Authorization
+
+Authentication is handled using Supabase Auth and Harbor JWT authentication.
+
+Roles:
+
+customer
+support_agent
+
+Public registration creates customer accounts.
+
+Protected backend routes validate:
+
+JWT
+User existence
+Active account status
+User role
+
+Role-based authorization ensures customers cannot access staff endpoints.
+
+14. Frontend
+
+The Harbor frontend is built using React.
+
+Main customer interface:
+
+AI Support
+My Cases
+
+Customer functionality includes:
+
+AI chat
+Conversation history
+Streaming responses
+Citations
+Support cases
+Ticket conversations
+Real-time notifications
+
+Staff functionality includes:
+
+Operations dashboard
+Ticket search
+Ticket filtering
+Approval workflow
+Ticket execution
+Customer replies
+Internal notes
+Notifications
+15. Backend
+
+The backend is implemented using FastAPI.
+
+Main responsibilities include:
+
+Authentication
+RAG
+AI orchestration
+Conversation memory
+Guardrails
+Ticket management
+Approval workflow
+WebSocket notifications
+Monday.com integration
+n8n integration
+Supabase persistence
+16. Technology Stack
+Frontend
+React
+Vite
+JavaScript
+CSS
+Fetch / Axios-style API communication
+WebSockets
+Server-Sent Events
+Backend
+Python
+FastAPI
+Pydantic
+Uvicorn
+httpx
+AI
+Groq
+LLaMA 3.3 70B
+LangChain
+LangGraph
+Sentence Transformers
+RAG
+Supabase
+PostgreSQL
+pgvector
+all-MiniLM-L6-v2
+Integrations
+Monday.com GraphQL API
+n8n
+Snowflake
+Authentication
+Supabase Auth
+JWT
+17. Project Structure
 Harbor/
+│
 ├── backend/
 │   ├── app/
 │   │   ├── agent/
@@ -165,42 +484,81 @@ Harbor/
 │   │   ├── guardrails/
 │   │   ├── integrations/
 │   │   ├── rag/
+│   │   ├── realtime/
 │   │   ├── repositories/
-│   │   ├── schemas/
 │   │   ├── services/
 │   │   ├── tickets/
 │   │   └── main.py
+│   │
 │   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   └── .env.example
+│   └── .env
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── api/
-│   │   ├── context/
 │   │   ├── pages/
-│   │   ├── routes/
-│   │   ├── App.jsx
-│   │   ├── index.css
-│   │   └── main.jsx
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   ├── .dockerignore
-│   └── .env.example
+│   │   ├── realtime/
+│   │   ├── styles/
+│   │   └── components/
+│   │
+│   └── package.json
 │
-├── .gitignore
 └── README.md
-6. Local Setup
-Backend
+18. Environment Variables
+
+Create:
+
+backend/.env
+
+Example:
+
+APP_ENV=development
+
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_ANON_KEY=
+
+STAFF_EMAIL=
+
+JWT_SECRET_KEY=
+
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
+
+MONDAY_API_TOKEN=
+MONDAY_BOARD_ID=
+MONDAY_GROUP_ID=
+
+MONDAY_HARBOR_TICKET_ID_COLUMN_ID=
+MONDAY_STATUS_COLUMN_ID=
+MONDAY_IDEMPOTENCY_KEY_COLUMN_ID=
+MONDAY_DESCRIPTION_COLUMN_ID=
+MONDAY_SEVERITY_COLUMN_ID=
+
+N8N_TICKET_WEBHOOK_URL=
+N8N_WEBHOOK_TIMEOUT_SECONDS=8
+
+Never commit the real .env file.
+
+Add:
+
+.env
+
+to .gitignore.
+
+19. Running the Backend
+
+Navigate to:
+
 cd backend
+
+Create a virtual environment:
+
 python -m venv venv
 
-Windows:
+Activate on Windows:
 
-venv\\Scripts\\activate
+venv\Scripts\activate
 
 Install dependencies:
 
@@ -210,416 +568,384 @@ Run:
 
 uvicorn app.main:app --reload
 
-Useful URLs:
+Backend:
 
-Backend:   http://localhost:8000
-Swagger:   http://localhost:8000/docs
-Health:    http://localhost:8000/api/v1/health
-Readiness: http://localhost:8000/api/v1/ready
-Frontend
+http://127.0.0.1:8000
+20. Running the Frontend
+
+Navigate to:
+
 cd frontend
+
+Install dependencies:
+
 npm install
+
+Run:
+
 npm run dev
 
 Frontend:
 
 http://localhost:5173
-7. Environment Variables
-Backend
-APP_NAME=Harbor API
-APP_ENV=development
-DEBUG=true
-LOG_LEVEL=INFO
-API_PREFIX=/api/v1
+21. End-to-End Workflow
+Customer
+   ↓
+Harbor AI
+   ↓
+RAG + Memory + Guardrails
+   ↓
+Informational?
+   ├── Yes
+   │     ↓
+   │ AI Answer + Citations
+   │
+   └── No
+         ↓
+      Escalation
+         ↓
+Customer Confirmation
+         ↓
+Support Ticket
+         ↓
+Staff Review
+         ↓
+Approve / Reject
+         ↓
+Approved
+         ↓
+Execute
+         ↓
+Monday.com
+         ↓
+Harbor Persistence
+         ↓
+n8n Automation
+         ↓
+Audit / Email / Snowflake
+22. Reliability Features
 
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+Harbor includes:
 
-GENERAL_RATE_LIMIT=120/minute
-AGENT_RATE_LIMIT=20/minute
-RAG_RATE_LIMIT=30/minute
-AUTH_RATE_LIMIT=10/minute
+Input guardrails
+Human approval
+Tool authorization
+Ticket idempotency
+Monday duplicate recovery
+Atomic execution claims
+Stale claim recovery
+WebSocket reconnection
+Persistent conversation history
+Persistent citations
+Role-based authorization
+Non-blocking downstream n8n delivery
+23. Performance Optimizations
 
-LLM_MAX_INPUT_CHARACTERS=4000
-LLM_REQUESTS_PER_USER_PER_MINUTE=20
+Harbor reuses the trusted Supabase database client so its underlying HTTP connection pool can be reused.
 
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+A short-lived authenticated-user cache also reduces repeated profile lookups when multiple API calls occur during page loading.
 
-JWT_SECRET_KEY=
-JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+Conversation sidebar loading uses batched message retrieval rather than issuing one query for every conversation.
 
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-EMBEDDING_DIMENSION=384
+24. Current Limitations
 
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+The current capstone implementation uses:
 
-MEMORY_BUFFER_SIZE=8
-MEMORY_SUMMARY_THRESHOLD=12
+In-memory WebSocket connection management
+In-memory notification unread state
+Background threads for n8n event delivery
 
-MONDAY_API_TOKEN=
-MONDAY_API_URL=https://api.monday.com/v2
-MONDAY_BOARD_ID=
-MONDAY_GROUP_ID=
-MONDAY_HARBOR_TICKET_ID_COLUMN_ID=
-MONDAY_STATUS_COLUMN_ID=
-MONDAY_IDEMPOTENCY_KEY_COLUMN_ID=
-MONDAY_DESCRIPTION_COLUMN_ID=
-MONDAY_SEVERITY_COLUMN_ID=
+These are appropriate for the current single-process capstone deployment.
 
-N8N_TICKET_WEBHOOK_URL=
-N8N_WEBHOOK_TIMEOUT_SECONDS=10
-Frontend
-VITE_API_BASE_URL=http://localhost:8000/api/v1
+For a larger production deployment they could be replaced with:
 
-Never commit real .env files or secret values.
+Redis Pub/Sub
+Durable notification storage
+Celery / Redis / RabbitMQ
+Transactional outbox pattern
+25. Future Improvements
 
-8. Authentication & Roles
+Potential future enhancements include:
 
-Harbor supports:
+Voice support using Vapi or Retell AI
+Persistent notification read state
+Redis-based realtime messaging
+Advanced analytics dashboard
+Durable event queue
+Automatic SLA monitoring
+More business integrations
+Ticket assignment
+Multi-agent support teams
+26. Capstone Requirements
+Requirement	Harbor Implementation
+RAG Knowledge Base	Supabase pgvector + embeddings
+Grounded Answers	RAG context + citations
+LangGraph / AI Agent	Agent routing and tools
+Memory	Message buffer + persistent summary
+Guardrails	Input/output and execution controls
+Human-in-the-loop	Staff approval before execution
+n8n Automation	Ticket execution workflow
+Business Integration	Monday.com
+Web Interface	React
+Authentication	Supabase + JWT
+Real-time Communication	WebSockets
+Deployment	To be deployed
+27. Project Status
 
-customer
-support_agent
-admin
+Core Harbor development is complete.
 
-Public registration creates only customer accounts.
+Current status:
 
-The backend RBAC layer is the authoritative security boundary. Frontend route guards are only UX controls.
+AI Assistant            Complete
+RAG                     Complete
+Conversation Memory     Complete
+Conversation History    Complete
+Guardrails              Complete
+Ticket System           Complete
+Human Approval          Complete
+Realtime Notifications  Complete
+Monday.com              Complete
+n8n                     Complete
+Frontend                Complete
+Backend                 Complete
+Deployment              Pending
+Author
 
-9. RAG Design
-Support Documents
-      |
-      v
-Chunking
-      |
-      v
-MiniLM Embeddings
-      |
-      v
-Supabase pgvector
-      |
-      v
-Similarity Retrieval
-      |
-      v
-Grounded Prompt
-      |
-      v
-Groq
-      |
-      v
-Answer + Citations
+Muhammad Idrees Ehsan
 
-Embedding model:
+DevOrbis Capstone Project
 
-sentence-transformers/all-MiniLM-L6-v2
+AI / ML & Software Engineering
 
-Embedding dimension:
 
-384
-10. LangGraph Workflow
+That is strong enough for both GitHub and your capstone evaluator. You can shorten it later, but for a flagship project I would keep the technical detail.
 
-Actions:
+---
 
-answer
-clarify
-escalate
+# 2. Harbor Architecture Diagram
 
-Answer sources:
+For the README, the easiest professional solution is **Mermaid** because GitHub renders it directly.
 
-knowledge_base
-conversation_memory
-Input
-  |
-  v
-Input Guardrail
-  |
-  +---- blocked ------> Safe Blocked Response
-  |
-  +---- escalate -----> Escalation
-  |
-  v
-Decision Node
-  |
-  +---- answer + KB ----------> RAG Answer
-  |
-  +---- answer + memory ------> Memory Answer
-  |
-  +---- clarify -------------> Clarification
-  |
-  +---- escalate ------------> Human Escalation
-11. Human-in-the-Loop Ticket Lifecycle
-Customer conversation
-      |
-      v
-Agent decides: escalate
-      |
-      v
-Internal Harbor ticket
-status = pending_approval
-approval_status = pending
-      |
-      +---- Reject ----> rejected
-      |
-      v
-Approve
-status = approved
-approval_status = approved
-      |
-      v
-Atomic execution claim
-status = executing
-      |
-      v
-Monday.com lookup/create
-      |
-      v
-Harbor finalization
-status = open
+Add this section to the README:
 
-External execution requires persisted human approval.
+````markdown
+## System Architecture
 
-12. Idempotency & Execution Safety
+```mermaid
+flowchart TB
 
-Harbor uses:
+    Customer["Customer"]
+    Staff["Support Agent"]
 
-deterministic ticket idempotency;
-Monday.com lookup-before-create;
-atomic execution claims;
-execution claim ownership;
-stale lease detection;
-stale lease recovery;
-claim-owned finalization.
+    subgraph Frontend["React Frontend"]
+        Chat["AI Support Chat"]
+        Cases["My Cases"]
+        StaffUI["Staff Dashboard"]
+        Bell["Realtime Notifications"]
+    end
 
-If a Monday item already exists for the idempotency key, Harbor reuses it rather than creating a duplicate.
+    subgraph Backend["FastAPI Backend"]
+        Auth["Authentication & RBAC"]
+        Agent["AI Agent / LangGraph"]
+        Guardrails["Guardrails"]
+        Memory["Conversation Memory"]
+        RAG["RAG Pipeline"]
+        TicketService["Ticket Service"]
+        Approval["Human Approval Layer"]
+        Execution["Execution Service"]
+        WS["WebSocket Manager"]
+    end
 
-13. n8n Cloud Automation
+    subgraph AI["AI Layer"]
+        Groq["Groq / LLaMA 3.3 70B"]
+        Embeddings["all-MiniLM-L6-v2"]
+    end
 
-After Harbor safely finalizes the Monday.com operation, it sends an event to n8n Cloud.
+    subgraph Supabase["Supabase"]
+        Users["Users"]
+        Conversations["Conversations"]
+        Messages["Messages"]
+        Summaries["Conversation Summaries"]
+        Tickets["Support Tickets"]
+        Updates["Ticket Updates"]
+        VectorDB["PostgreSQL + pgvector"]
+    end
 
-Example:
+    subgraph External["External Business Systems"]
+        Monday["Monday.com"]
+        N8N["n8n Automation"]
+        Email["Email / Notifications"]
+        Snowflake["Snowflake"]
+        Audit["Audit Logging"]
+    end
 
-{
-  "event_type": "ticket.executed",
-  "ticket_id": "UUID",
-  "monday_item_id": "123456789",
-  "title": "Customer support escalation",
-  "description": "Customer request details",
-  "severity": "medium",
-  "status": "open",
-  "source": "harbor",
-  "idempotency_key": "harbor-ticket-..."
-}
+    Customer --> Chat
+    Customer --> Cases
+    Staff --> StaffUI
 
-Workflow:
+    Chat --> Auth
+    Cases --> Auth
+    StaffUI --> Auth
 
-Webhook
-   |
-   v
-Validate / Normalize
-   |
-   v
-Duplicate Check
-   |
-   v
-Priority?
-  / \\
- /   \\
-High  Low/Medium
- |       |
- v       v
-Priority Normal
-Email    Email
-   \\     /
-    \\   /
-     v v
-Supabase Audit
-      |
-      v
-Snowflake
-14. API Overview
-GET  /api/v1/health
-GET  /api/v1/ready
+    Auth --> Users
 
-POST /api/v1/auth/register
-POST /api/v1/auth/login
-POST /api/v1/auth/token
-GET  /api/v1/auth/me
+    Chat --> Agent
 
-POST /api/v1/rag/ask
-POST /api/v1/agent/chat
+    Agent --> Guardrails
+    Guardrails --> Memory
+    Memory --> Conversations
+    Memory --> Messages
+    Memory --> Summaries
 
-GET  /api/v1/tickets
-GET  /api/v1/tickets/{ticket_id}
-POST /api/v1/tickets/{ticket_id}/approval
-POST /api/v1/tickets/{ticket_id}/execute
+    Agent --> RAG
+    RAG --> Embeddings
+    Embeddings --> VectorDB
+    RAG --> Groq
+    Agent --> Groq
 
-Protected endpoints require:
+    Agent --> TicketService
+    TicketService --> Tickets
 
-Authorization: Bearer <JWT>
-15. Docker
-Backend
-cd backend
-docker build -t harbor-backend .
-docker run --env-file .env -p 8000:8000 harbor-backend
-Frontend
-cd frontend
+    Cases --> TicketService
+    StaffUI --> TicketService
 
-docker build \\
-  --build-arg VITE_API_BASE_URL=http://localhost:8000/api/v1 \\
-  -t harbor-frontend .
+    TicketService --> Updates
 
-docker run -p 8080:8080 harbor-frontend
-16. Railway Deployment
+    StaffUI --> Approval
+    Approval --> Tickets
 
-Harbor is deployed as two Railway services:
+    Approval --> Execution
+    Execution --> Monday
 
-Railway Project: Harbor
+    Monday --> Execution
+    Execution --> Tickets
 
-├── harbor-backend
-│   └── Root Directory: /backend
-│
-└── harbor-frontend
-    └── Root Directory: /frontend
-Backend variables
-APP_ENV=production
-DEBUG=false
-LOG_LEVEL=INFO
+    Execution --> N8N
 
-CORS_ORIGINS=https://<frontend-domain>
+    N8N --> Email
+    N8N --> Audit
+    N8N --> Snowflake
 
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+    TicketService --> WS
+    WS --> Bell
+    Bell --> Customer
+    Bell --> Staff
 
-JWT_SECRET_KEY=
-GROQ_API_KEY=
+### Simplified architecture
 
-MONDAY_API_TOKEN=
-MONDAY_BOARD_ID=
-MONDAY_GROUP_ID=
+For your presentation or viva, use this easier diagram:
 
-N8N_TICKET_WEBHOOK_URL=
+```text id="mxr874"
+                   ┌───────────────────────┐
+                   │       CUSTOMER        │
+                   └───────────┬───────────┘
+                               │
+                               ▼
+                 ┌─────────────────────────┐
+                 │     REACT FRONTEND      │
+                 │                         │
+                 │ AI Chat     My Cases    │
+                 └─────────────┬───────────┘
+                               │
+                               ▼
+                 ┌─────────────────────────┐
+                 │      FASTAPI API        │
+                 │                         │
+                 │ Auth + RBAC             │
+                 │ Guardrails              │
+                 │ AI Agent / LangGraph    │
+                 │ Ticket Service          │
+                 │ WebSockets              │
+                 └──────────┬───────┬──────┘
+                            │       │
+                  ┌─────────┘       └─────────┐
+                  ▼                           ▼
+       ┌───────────────────┐       ┌──────────────────┐
+       │   AI / RAG Layer  │       │     Supabase     │
+       │                   │       │                  │
+       │ Groq LLM          │       │ Users            │
+       │ MiniLM Embeddings │       │ Conversations    │
+       │ pgvector Search   │       │ Messages         │
+       │ Memory            │       │ Tickets          │
+       └─────────┬─────────┘       │ Ticket Updates   │
+                 │                 │ pgvector         │
+                 └───────┬─────────┴──────────────────┘
+                         │
+                         ▼
+                 ┌────────────────────┐
+                 │ HUMAN APPROVAL     │
+                 │ Support Agent      │
+                 └─────────┬──────────┘
+                           │
+                         Approve
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │ Execution Service  │
+                 │ + Idempotency      │
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │     Monday.com     │
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │        n8n         │
+                 └─────┬─────┬───────┘
+                       │     │
+                  ┌────┘     └──────┐
+                  ▼                 ▼
+              Email/Audit       Snowflake
+```
 
-Healthcheck:
+And the **business workflow diagram**, which is particularly useful during your capstone demonstration:
 
-/api/v1/health
-Frontend
-VITE_API_BASE_URL=https://<backend-domain>/api/v1
-17. Testing Strategy
-Golden Path
-Customer login.
-Ask support question.
-Grounded answer appears.
-Citation is visible.
-Ask contextual follow-up.
-Conversation memory works.
-Request human support.
-LangGraph escalates.
-Internal ticket is created.
-Staff logs in.
-Staff sees ticket.
-Staff approves ticket.
-Staff executes ticket.
-Monday.com item is created/reused.
-Harbor finalizes ticket.
-Harbor posts to n8n.
-Gmail notification is sent.
-Supabase audit row is created.
-Snowflake row/report is created.
-Security / Failure Testing
+```mermaid
+flowchart LR
 
-Verify:
+    A["Customer Request"]
+    B{"Request Type?"}
+    C["RAG Answer"]
+    D["Answer + Citations"]
+    E["Escalation Required"]
+    F["Ask Customer Confirmation"]
+    G{"Customer Confirms?"}
+    H["Create Support Ticket"]
+    I["Staff Review"]
+    J{"Decision"}
+    K["Rejected"]
+    L["Approved"]
+    M["Execute Ticket"]
+    N["Monday Idempotency Check"]
+    O["Create / Reuse Monday Item"]
+    P["Save monday_item_id"]
+    Q["n8n Automation"]
+    R["Email / Audit / Snowflake"]
 
-unauthorized access fails;
-customers cannot perform staff actions;
-rejected tickets cannot execute;
-unapproved tickets cannot execute;
-executed tickets do not duplicate;
-active leases block competing workers;
-stale leases recover safely;
-prompt injection is blocked;
-PII/credential sanitization works;
-RAG no-answer remains grounded;
-duplicate n8n events do not resend effects;
-output guardrails block protected/internal content.
-18. Demo Flow
+    A --> B
 
-Target: 5–8 minutes
+    B -->|Informational| C
+    C --> D
 
-1. Customer login
-2. Support/refund question
-3. Grounded answer + citation
-4. Contextual follow-up
-5. Memory example
-6. Request human support
-7. Show ticket creation
-8. Staff login
-9. Approve ticket
-10. Execute ticket
-11. Monday.com item
-12. Gmail notification
-13. Supabase audit
-14. Snowflake report
-19. Current Status
-Implemented / Connected
-FastAPI backend
-Supabase PostgreSQL
-pgvector
-MiniLM embeddings
-Groq grounded RAG
-citations
-LangGraph
-conversation memory
-guardrails
-JWT / RBAC
-internal tickets
-human approval
-execution claims
-stale lease recovery
-Monday.com integration
-React customer chat
-React staff console
-escalation ticket feedback
-n8n integration code
-health/readiness endpoints
-production configuration
-Docker configuration
-Railway deployment preparation
-Final Verification Required
-verify both n8n branches;
-deploy backend/frontend on Railway;
-configure production CORS;
-run golden-path E2E tests;
-run security/failure tests;
-fix final issues;
-capture screenshots;
-complete demo.
-20. Known Limitations
+    B -->|Action| E
+    E --> F
+    F --> G
 
-Currently out of scope:
+    G -->|No| D
+    G -->|Yes| H
 
-voice agents;
-QuickBooks;
-elaborate dashboards;
-password reset;
-WebSockets;
-advanced admin management;
-extra AI agents;
-enterprise distributed rate limiting.
-21. Future Improvements
-Vapi/Retell voice support
-Redis-backed distributed rate limiting
-durable event outbox/retry
-richer staff dashboard
-real-time ticket status
-observability dashboard
-automated prompt regression
-deeper Snowflake analytics
-QuickBooks integration
-account recovery/password reset
-22. Project Principle
+    H --> I
+    I --> J
 
-Retrieve → Decide → Escalate → Approve → Execute → Automate → Audit
+    J -->|Reject| K
+    J -->|Approve| L
 
-Harbor is designed as a production-shaped AI support workflow rather than a collection of disconnected AI demos.
+    L --> M
+    M --> N
+    N --> O
+    O --> P
+    P --> Q
+    Q --> R
+```
