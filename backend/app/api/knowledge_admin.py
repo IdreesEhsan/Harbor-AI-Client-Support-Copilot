@@ -4,7 +4,10 @@ import tempfile
 from datetime import date
 from pathlib import Path
 from uuid import UUID
-
+from app.rag.analytics import (
+    get_rag_analytics_summary,
+    list_knowledge_gaps,
+)
 from fastapi import (
     APIRouter,
     Depends,
@@ -318,3 +321,46 @@ def activate_document_version(
                 exc
             ),
         ) from exc
+
+# ============================================================
+# RAG ANALYTICS SUMMARY
+# ============================================================
+
+@router.get(
+    "/analytics",
+)
+def rag_analytics(
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    return (
+        get_rag_analytics_summary()
+    )
+
+
+# ============================================================
+# KNOWLEDGE GAPS
+# ============================================================
+
+@router.get(
+    "/knowledge-gaps",
+)
+def knowledge_gaps(
+    limit: int = 100,
+
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    return (
+        list_knowledge_gaps(
+            limit=limit
+        )
+    )
