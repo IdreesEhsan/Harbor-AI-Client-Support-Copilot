@@ -1,50 +1,105 @@
-from app.rag.embeddings import embed_query
-from app.rag.vector_store import similarity_search
-from app.schemas.rag import RetrievedChunk
+from app.rag.embeddings import (
+    embed_query,
+)
+
+from app.rag.vector_store import (
+    similarity_search,
+)
+
+from app.schemas.rag import (
+    RetrievedChunk,
+)
 
 
 def retrieve_chunks(
     question: str,
     match_threshold: float = 0.35,
     match_count: int = 5,
-) -> list[RetrievedChunk]:
+) -> list[
+    RetrievedChunk
+]:
     """
-    Embed the user's question and retrieve relevant Harbor
-    knowledge-base chunks from Supabase pgvector.
+    Retrieve semantically relevant Harbor knowledge chunks.
+
+    similarity_search() now searches only currently-active
+    knowledge-document versions.
     """
 
-    question = question.strip()
+    question = (
+        question.strip()
+    )
 
     if not question:
         raise ValueError(
             "Question cannot be empty."
         )
 
-    query_embedding = embed_query(
-        question
+    query_embedding = (
+        embed_query(
+            question
+        )
     )
 
-    rows = similarity_search(
-        query_embedding=query_embedding,
-        match_threshold=match_threshold,
-        match_count=match_count,
+    rows = (
+        similarity_search(
+            query_embedding=(
+                query_embedding
+            ),
+            match_threshold=(
+                match_threshold
+            ),
+            match_count=(
+                match_count
+            ),
+        )
     )
 
     return [
         RetrievedChunk(
-            id=str(row["id"]),
+            id=str(
+                row[
+                    "id"
+                ]
+            ),
+
             document_id=str(
-                row["document_id"]
+                row[
+                    "document_id"
+                ]
             ),
-            source_name=row["source_name"],
-            content=row["content"],
-            chunk_index=row["chunk_index"],
+
+            source_name=(
+                row[
+                    "source_name"
+                ]
+            ),
+
+            content=(
+                row[
+                    "content"
+                ]
+            ),
+
+            chunk_index=(
+                row[
+                    "chunk_index"
+                ]
+            ),
+
             similarity=float(
-                row["similarity"]
+                row[
+                    "similarity"
+                ]
             ),
-            metadata=row.get(
-                "metadata"
-            ) or {},
+
+            metadata=(
+                row.get(
+                    "metadata"
+                )
+                or {}
+            ),
         )
-        for row in rows
+
+        for row
+        in rows
     ]

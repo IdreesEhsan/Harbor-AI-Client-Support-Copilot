@@ -1,0 +1,320 @@
+import shutil
+import tempfile
+
+from datetime import date
+from pathlib import Path
+from uuid import UUID
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
+
+from fastapi.concurrency import (
+    run_in_threadpool,
+)
+
+from app.dependencies.auth import (
+    require_roles,
+)
+
+from app.rag.indexer import (
+    index_document,
+)
+
+from app.rag.vector_store import (
+    activate_document,
+    list_knowledge_documents,
+)
+
+
+router = APIRouter(
+    prefix="/knowledge",
+    tags=[
+        "Knowledge Management",
+    ],
+)
+
+
+ALLOWED_EXTENSIONS = {
+    ".txt",
+    ".pdf",
+    ".docx",
+}
+
+
+# ============================================================
+# LIST DOCUMENTS
+# ============================================================
+
+@router.get(
+    "/documents",
+)
+def get_documents(
+    active_only: bool = False,
+    logical_key: str | None = None,
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    return (
+        list_knowledge_documents(
+            logical_key=(
+                logical_key
+            ),
+            active_only=(
+                active_only
+            ),
+            limit=200,
+        )
+    )
+
+
+# ============================================================
+# UPLOAD NEW VERSION
+# ============================================================
+
+@router.post(
+    "/documents",
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
+)
+async def upload_document_version(
+    file: UploadFile = File(...),
+
+    logical_key: str = Form(...),
+
+    title: str = Form(...),
+
+    category: str = Form(
+        "general"
+    ),
+
+    version: str = Form(...),
+
+    effective_date: date | None = Form(
+        None
+    ),
+
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    filename = (
+        file.filename
+        or ""
+    ).strip()
+
+    if not filename:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Uploaded file must have "
+                "a filename."
+            ),
+        )
+
+    suffix = (
+        Path(
+            filename
+        )
+        .suffix
+        .lower()
+    )
+
+    if (
+        suffix
+        not in ALLOWED_EXTENSIONS
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Only TXT, PDF, and DOCX "
+                "documents are supported."
+            ),
+        )
+
+    logical_key = (
+        logical_key
+        .strip()
+        .lower()
+    )
+
+    title = (
+        title.strip()
+    )
+
+    category = (
+        category
+        .strip()
+        .lower()
+    )
+
+    version = (
+        version.strip()
+    )
+
+    if not logical_key:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "logical_key cannot be empty."
+            ),
+        )
+
+    if not title:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "title cannot be empty."
+            ),
+        )
+
+    if not version:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "version cannot be empty."
+            ),
+        )
+
+
+    temp_directory = (
+        Path(
+            tempfile.mkdtemp(
+                prefix=(
+                    "harbor-kb-"
+                )
+            )
+        )
+    )
+
+    temp_file = (
+        temp_directory
+        / filename
+    )
+
+    try:
+        with temp_file.open(
+            "wb"
+        ) as destination:
+            while True:
+                chunk = (
+                    await file.read(
+                        1024 * 1024
+                    )
+                )
+
+                if not chunk:
+                    break
+
+                destination.write(
+                    chunk
+                )
+
+        result = (
+            await run_in_threadpool(
+                index_document,
+
+                temp_file,
+
+                logical_key=(
+                    logical_key
+                ),
+
+                title=(
+                    title
+                ),
+
+                category=(
+                    category
+                ),
+
+                version=(
+                    version
+                ),
+
+                effective_date=(
+                    effective_date
+                ),
+
+                uploaded_by=str(
+                    current_user[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        return result
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+    finally:
+        await file.close()
+
+        shutil.rmtree(
+            temp_directory,
+            ignore_errors=True,
+        )
+
+
+# ============================================================
+# ACTIVATE PREVIOUS VERSION
+# ============================================================
+
+@router.post(
+    "/documents/{document_id}/activate",
+)
+def activate_document_version(
+    document_id: UUID,
+
+    current_user=Depends(
+        require_roles(
+            "support_agent",
+            "admin",
+        )
+    ),
+):
+    try:
+        return (
+            activate_document(
+                str(
+                    document_id
+                )
+            )
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(
+                exc
+            ),
+        ) from exc

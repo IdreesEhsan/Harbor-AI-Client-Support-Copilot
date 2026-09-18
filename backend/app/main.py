@@ -6,9 +6,11 @@ from fastapi import (
     FastAPI,
     Request,
 )
+
 from fastapi.middleware.cors import (
     CORSMiddleware,
 )
+
 from fastapi.responses import (
     JSONResponse,
 )
@@ -16,38 +18,61 @@ from fastapi.responses import (
 from slowapi import (
     _rate_limit_exceeded_handler,
 )
+
 from slowapi.errors import (
     RateLimitExceeded,
 )
 
+
+# ============================================================
+# API ROUTERS
+# ============================================================
+
 from app.api.agent import (
     router as agent_router,
 )
+
 from app.api.auth import (
     router as auth_router,
 )
+
 from app.api.conversations import (
     router as conversations_router,
 )
+
 from app.api.health import (
     router as health_router,
 )
+
+from app.api.knowledge_admin import (
+    router as knowledge_admin_router,
+)
+
 from app.api.rag import (
     router as rag_router,
 )
+
 from app.api.realtime import (
     router as realtime_router,
 )
+
 from app.api.tickets import (
     router as tickets_router,
 )
+
 from app.api.voice import (
     router as voice_router,
 )
 
+
+# ============================================================
+# CORE
+# ============================================================
+
 from app.core.config import (
     get_settings,
 )
+
 from app.core.rate_limit import (
     limiter,
 )
@@ -57,7 +82,7 @@ settings = get_settings()
 
 
 # ============================================================
-# Logging
+# LOGGING
 # ============================================================
 
 logging.basicConfig(
@@ -81,18 +106,21 @@ logger = logging.getLogger(
 
 
 # ============================================================
-# Application
+# APPLICATION
 # ============================================================
 
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     debug=settings.debug,
+    description=(
+        "Harbor AI Client Support Copilot API"
+    ),
 )
 
 
 # ============================================================
-# Rate limiter
+# RATE LIMITER
 # ============================================================
 
 app.state.limiter = (
@@ -142,7 +170,7 @@ app.add_middleware(
 
 
 # ============================================================
-# Request logging
+# REQUEST LOGGING MIDDLEWARE
 # ============================================================
 
 @app.middleware("http")
@@ -151,16 +179,16 @@ async def request_logging_middleware(
     call_next,
 ):
     """
-    Attach a request ID and record safe request metrics.
+    Add a unique request ID and production-safe logging.
 
-    Harbor deliberately does not log:
+    Harbor intentionally does not log:
 
-    - JWTs
-    - authorization headers
+    - Authorization headers
+    - JWT tokens
+    - Passwords
     - API keys
-    - request bodies
-    - passwords
-    - raw customer PII
+    - Request bodies
+    - Raw customer PII
     """
 
     request_id = (
@@ -248,7 +276,7 @@ async def request_logging_middleware(
 
 
 # ============================================================
-# Global exception handler
+# GLOBAL EXCEPTION HANDLER
 # ============================================================
 
 @app.exception_handler(
@@ -259,9 +287,10 @@ async def global_exception_handler(
     exc: Exception,
 ):
     """
-    Return a safe error message for unexpected failures.
+    Return a safe response for unexpected failures.
 
-    Full stack traces remain available only in backend logs.
+    Internal exception details remain available only in
+    backend logs.
     """
 
     request_id = (
@@ -293,8 +322,8 @@ async def global_exception_handler(
         content={
             "detail":
                 (
-                    "An unexpected server error "
-                    "occurred."
+                    "An unexpected server "
+                    "error occurred."
                 ),
 
             "request_id":
@@ -309,11 +338,20 @@ async def global_exception_handler(
 
 
 # ============================================================
-# Root endpoint
+# ROOT
 # ============================================================
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=[
+        "Root",
+    ],
+)
 def root():
+    """
+    Basic Harbor API information.
+    """
+
     return {
         "name":
             settings.app_name,
@@ -327,81 +365,175 @@ def root():
         "version":
             "1.0.0",
 
-        "voice":
-            "enabled",
+        "features": {
+            "rag":
+                True,
+
+            "knowledge_management":
+                True,
+
+            "policy_versioning":
+                True,
+
+            "voice":
+                True,
+
+            "tickets":
+                True,
+
+            "realtime":
+                True,
+        },
     }
 
 
 # ============================================================
-# Routers
+# HEALTH
 # ============================================================
 
 app.include_router(
     health_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Health",
     ],
 )
 
 
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+
 app.include_router(
     auth_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Authentication",
     ],
 )
 
 
+# ============================================================
+# RAG
+# ============================================================
+
 app.include_router(
     rag_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "RAG",
     ],
 )
 
 
+# ============================================================
+# KNOWLEDGE MANAGEMENT
+# ============================================================
+
+app.include_router(
+    knowledge_admin_router,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
+    tags=[
+        "Knowledge Management",
+    ],
+)
+
+
+# ============================================================
+# AI AGENT
+# ============================================================
+
 app.include_router(
     agent_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Agent",
     ],
 )
 
 
+# ============================================================
+# CONVERSATIONS
+# ============================================================
+
 app.include_router(
     conversations_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Conversations",
     ],
 )
 
 
+# ============================================================
+# TICKETS
+# ============================================================
+
 app.include_router(
     tickets_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Tickets",
     ],
 )
 
 
+# ============================================================
+# REALTIME / WEBSOCKET
+# ============================================================
+
 app.include_router(
     realtime_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Realtime",
     ],
 )
 
 
+# ============================================================
+# RETELL VOICE
+# ============================================================
+
 app.include_router(
     voice_router,
-    prefix=settings.api_prefix,
+
+    prefix=(
+        settings.api_prefix
+    ),
+
     tags=[
         "Voice",
     ],
