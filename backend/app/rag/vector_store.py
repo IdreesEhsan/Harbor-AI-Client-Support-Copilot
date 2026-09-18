@@ -58,12 +58,6 @@ def _clean_required_string(
 def get_document_by_source(
     source_name: str,
 ) -> dict[str, Any] | None:
-    """
-    Compatibility lookup for older Harbor code.
-
-    Returns the newest matching source record.
-    """
-
     source_name = (
         _clean_required_string(
             source_name,
@@ -80,9 +74,7 @@ def get_document_by_source(
         .table(
             "knowledge_documents"
         )
-        .select(
-            "*"
-        )
+        .select("*")
         .eq(
             "source_name",
             source_name,
@@ -91,9 +83,7 @@ def get_document_by_source(
             "created_at",
             desc=True,
         )
-        .limit(
-            1
-        )
+        .limit(1)
         .execute()
     )
 
@@ -106,11 +96,6 @@ def get_document_by_source(
 def get_active_document_by_logical_key(
     logical_key: str,
 ) -> dict[str, Any] | None:
-    """
-    Return the currently-active version of one logical
-    knowledge document.
-    """
-
     logical_key = (
         _clean_required_string(
             logical_key,
@@ -128,9 +113,7 @@ def get_active_document_by_logical_key(
         .table(
             "knowledge_documents"
         )
-        .select(
-            "*"
-        )
+        .select("*")
         .eq(
             "logical_key",
             logical_key,
@@ -139,9 +122,7 @@ def get_active_document_by_logical_key(
             "is_active",
             True,
         )
-        .limit(
-            1
-        )
+        .limit(1)
         .execute()
     )
 
@@ -156,12 +137,6 @@ def get_document_by_content_hash(
     logical_key: str,
     content_hash: str,
 ) -> dict[str, Any] | None:
-    """
-    Find a previous version containing identical content.
-
-    This prevents unnecessary duplicate indexing.
-    """
-
     logical_key = (
         _clean_required_string(
             logical_key,
@@ -186,9 +161,7 @@ def get_document_by_content_hash(
         .table(
             "knowledge_documents"
         )
-        .select(
-            "*"
-        )
+        .select("*")
         .eq(
             "logical_key",
             logical_key,
@@ -201,9 +174,7 @@ def get_document_by_content_hash(
             "created_at",
             desc=True,
         )
-        .limit(
-            1
-        )
+        .limit(1)
         .execute()
     )
 
@@ -233,9 +204,7 @@ def list_knowledge_documents(
         .table(
             "knowledge_documents"
         )
-        .select(
-            "*"
-        )
+        .select("*")
     )
 
     if logical_key:
@@ -262,9 +231,7 @@ def list_knowledge_documents(
             "created_at",
             desc=True,
         )
-        .limit(
-            limit
-        )
+        .limit(limit)
         .execute()
     )
 
@@ -323,11 +290,6 @@ def deactivate_documents(
 def activate_document(
     document_id: str,
 ) -> dict[str, Any]:
-    """
-    Activate one version and deactivate every other version
-    belonging to the same logical policy.
-    """
-
     document_id = (
         _clean_required_string(
             document_id,
@@ -344,16 +306,12 @@ def activate_document(
         .table(
             "knowledge_documents"
         )
-        .select(
-            "*"
-        )
+        .select("*")
         .eq(
             "id",
             document_id,
         )
-        .limit(
-            1
-        )
+        .limit(1)
         .execute()
     )
 
@@ -417,7 +375,7 @@ def activate_document(
 
 
 # ============================================================
-# CREATE DOCUMENT VERSION
+# CREATE DOCUMENT
 # ============================================================
 
 def create_document(
@@ -434,12 +392,6 @@ def create_document(
     uploaded_by: str | None = None,
     is_active: bool = True,
 ) -> str:
-    """
-    Create one immutable knowledge-document version.
-
-    Existing document rows are no longer overwritten.
-    """
-
     source_name = (
         _clean_required_string(
             source_name,
@@ -508,7 +460,6 @@ def create_document(
         effective_date_value = (
             effective_date.isoformat()
         )
-
     else:
         effective_date_value = (
             effective_date
@@ -605,12 +556,6 @@ def update_document(
     content_hash: str,
     metadata: dict[str, Any],
 ) -> None:
-    """
-    Kept for compatibility.
-
-    New versioned ingestion should prefer create_document().
-    """
-
     supabase = (
         get_supabase_client()
     )
@@ -763,19 +708,18 @@ def insert_chunks(
 
 
 # ============================================================
-# ACTIVE-ONLY SIMILARITY SEARCH
+# VECTOR SEARCH
 # ============================================================
 
 def similarity_search(
     query_embedding: list[float],
     match_threshold: float = 0.35,
-    match_count: int = 5,
+    match_count: int = 10,
 ) -> list[
     dict[str, Any]
 ]:
     """
-    Search only chunks belonging to currently-active,
-    successfully-indexed knowledge documents.
+    Semantic vector search over active Harbor documents.
     """
 
     supabase = (
@@ -792,6 +736,52 @@ def similarity_search(
 
                 "match_threshold":
                     match_threshold,
+
+                "match_count":
+                    match_count,
+            },
+        )
+        .execute()
+    )
+
+    return (
+        response.data
+        or []
+    )
+
+
+# ============================================================
+# KEYWORD SEARCH
+# ============================================================
+
+def keyword_search(
+    query: str,
+    match_count: int = 10,
+) -> list[
+    dict[str, Any]
+]:
+    """
+    PostgreSQL full-text search over active Harbor documents.
+    """
+
+    query = (
+        _clean_required_string(
+            query,
+            "query",
+        )
+    )
+
+    supabase = (
+        get_supabase_client()
+    )
+
+    response = (
+        supabase
+        .rpc(
+            "search_active_knowledge_chunks_keyword",
+            {
+                "search_query":
+                    query,
 
                 "match_count":
                     match_count,
